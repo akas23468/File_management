@@ -182,6 +182,157 @@ html.compact-ui .space-y-4 > :not([hidden]) ~ :not([hidden]) {
   100% { transform: translateY(0px) rotate(0deg); }
 }
 
-.animate-strata {
-  animation: strataShift 12s ease-in-out infinite;
+/* Report Generator Markdown & Print Styling */
+.report-markdown-body h1 {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #141C2B;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.report-markdown-body h2 {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #141C2B;
+  margin-top: 1.5rem;
+  margin-bottom: 0.6rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid #E4E0D6;
+}
+
+.report-markdown-body h3 {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1E293B;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.report-markdown-body p {
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: #1E293B;
+  margin-bottom: 0.85rem;
+}
+
+.report-markdown-body hr {
+  border: 0;
+  border-top: 1px dashed #D4CEBF;
+  margin: 1.25rem 0;
+}
+
+.report-markdown-body ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.report-markdown-body ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.report-markdown-body li {
+  margin-bottom: 0.35rem;
+}
+
+.report-markdown-body strong {
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.report-markdown-body em {
+  font-style: italic;
+  color: #475569;
+}
+
+.report-markdown-body blockquote {
+  border-left: 3px solid #C8892E;
+  padding-left: 1rem;
+  margin: 1rem 0;
+  color: #475569;
+  font-style: italic;
+}
+
+/* Dark mode markdown */
+html.dark .report-markdown-body h1,
+html.dark .report-markdown-body h2,
+html.dark .report-markdown-body h3,
+html.dark .report-markdown-body strong {
+  color: #F8FAFC !important;
+}
+
+html.dark .report-markdown-body p,
+html.dark .report-markdown-body li {
+  color: #CBD5E1 !important;
+}
+
+html.dark .report-markdown-body h2,
+html.dark .report-markdown-body hr {
+  border-color: #334155 !important;
+}
+
+/* High Quality Print & Export PDF Styling */
+@media print {
+  @page {
+    margin: 15mm 15mm 15mm 15mm;
+    size: A4 portrait;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11pt !important;
+  }
+
+  #minemind-header,
+  #minemind-sidebar,
+  nav,
+  header,
+  .print\\:hidden {
+    display: none !important;
+  }
+
+  #minemind-root-layout,
+  main,
+  #report-generator-view {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    background: #ffffff !important;
+  }
+
+  .report-markdown-body {
+    background: #ffffff !important;
+    border: none !important;
+    padding: 0 !important;
+    color: #000000 !important;
+  }
+
+  .report-markdown-body h1,
+  .report-markdown-body h2,
+  .report-markdown-body h3,
+  .report-markdown-body strong {
+    color: #000000 !important;
+  }
+
+  .report-markdown-body p,
+  .report-markdown-body li {
+    color: #111111 !important;
+  }
+
+  .report-print-container {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+  }
 }

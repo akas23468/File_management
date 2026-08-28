@@ -4,19 +4,11 @@ import { Subsidiary } from '../types';
 import { 
   Building2, 
   Search, 
-  Sparkles, 
-  ShieldCheck, 
-  FileCheck2, 
-  Bell, 
-  Filter,
-  CheckCircle2,
-  AlertCircle,
-  Wifi,
-  WifiOff,
-  DownloadCloud,
-  HardDrive,
-  Check,
-  Menu
+  Wifi, 
+  WifiOff, 
+  Menu,
+  User,
+  ShieldCheck
 } from 'lucide-react';
 
 const SUBSIDIARIES: (Subsidiary | 'ALL')[] = [
@@ -37,24 +29,14 @@ export const Header: React.FC = () => {
     activeView, 
     selectedSubsidiary, 
     setSelectedSubsidiary,
-    knowledgeSearchTerm,
-    setKnowledgeSearchTerm,
-    setActiveView,
-    chunks,
-    documents,
-    isOnline,
-    isSimulatedOffline,
-    toggleSimulateOffline,
     isUndergroundModeActive,
+    toggleSimulateOffline,
+    toggleMobileNav,
     cachedDocumentIds,
-    precacheAllDocumentsForUnderground,
-    lastOfflineSyncTime,
-    toggleMobileNav
+    documents,
+    offlineStorageSizeBytes,
+    setActiveView
   } = useApp();
-
-  const approvedChunksCount = chunks.filter(c => c.isApproved).length;
-  const approvedDocsCount = documents.filter(d => d.status === 'approved').length;
-  const cachedDocsCount = cachedDocumentIds.length;
 
   const viewTitles: Record<string, { title: string; subtitle: string }> = {
     dashboard: {
@@ -98,11 +80,12 @@ export const Header: React.FC = () => {
   };
 
   const currentViewMeta = viewTitles[activeView] || { title: 'MineMind AI Platform', subtitle: 'From scattered reports to smarter mining decision' };
+  const sizeMb = ((offlineStorageSizeBytes || 0) / (1024 * 1024)).toFixed(1);
 
   return (
-    <header id="minemind-header" className="bg-[#FFFFFF] border-b border-[#E4E0D6] px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between shadow-xs sticky top-0 z-20">
+    <header id="minemind-header" className="bg-[#FFFFFF] border-b border-[#E4E0D6] px-4 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between shadow-xs sticky top-0 z-20">
       {/* Mobile Hamburger & View Title */}
-      <div className="flex items-center gap-2 min-w-0 pr-2 sm:pr-4">
+      <div className="flex items-center gap-2.5 min-w-0 pr-2">
         <button
           type="button"
           id="btn-toggle-mobile-menu"
@@ -115,107 +98,82 @@ export const Header: React.FC = () => {
         </button>
 
         <div className="min-w-0">
-          <h1 className="font-serif font-bold text-base sm:text-lg md:text-xl text-[#141C2B] tracking-tight truncate flex items-center gap-2">
+          <h1 className="font-serif font-bold text-base sm:text-lg text-[#141C2B] tracking-tight truncate flex items-center gap-2">
             <span className="truncate">{currentViewMeta.title}</span>
             {isUndergroundModeActive && (
               <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] px-1.5 py-0.5 rounded-full flex-shrink-0 animate-pulse">
                 <WifiOff className="w-2.5 h-2.5 text-[#D97706]" />
-                <span className="hidden sm:inline">UNDERGROUND OFFLINE</span>
-                <span className="sm:hidden">OFFLINE</span>
+                <span>OFFLINE</span>
               </span>
             )}
           </h1>
         </div>
       </div>
 
-      {/* Center/Right Actions & Filters */}
-      <div className="flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0">
-        {/* Search Quick Bar (Desktop) */}
-        <div className="relative w-48 xl:w-56 hidden lg:block">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8F9BAE]" />
-          <input
-            id="header-global-search"
-            type="text"
-            placeholder="Search approved records..."
-            value={knowledgeSearchTerm}
-            onChange={(e) => {
-              setKnowledgeSearchTerm(e.target.value);
-              if (activeView !== 'knowledge') {
-                setActiveView('knowledge');
-              }
-            }}
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-[#F7F5F0] border border-[#E4E0D6] rounded-lg focus:outline-none focus:border-[#C8892E] focus:bg-white transition-all text-[#141C2B]"
-          />
-        </div>
-
-        {/* Underground / Offline Pre-cache Button */}
-        <button
-          id="btn-precache-underground"
-          onClick={precacheAllDocumentsForUnderground}
-          title={`Click to sync all ${documents.length} mining documents into local service worker cache`}
-          className="flex items-center gap-1 sm:gap-1.5 bg-[#F7F5F0] hover:bg-[#EFEBE2] text-[#141C2B] border border-[#E4E0D6] px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer"
-        >
-          <DownloadCloud className="w-3.5 h-3.5 text-[#C8892E]" />
-          <span className="hidden md:inline">Cache:</span>
-          <span className="font-bold text-[#166534] bg-[#DCFCE7] px-1 sm:px-1.5 py-0.2 rounded text-[10px]">
-            {cachedDocsCount}/{documents.length}
-          </span>
-        </button>
-
-        {/* Offline Underground Simulator Switch */}
-        <button
-          id="btn-toggle-underground-mode"
-          onClick={toggleSimulateOffline}
-          title={isUndergroundModeActive ? 'Switch back to online cloud mode' : 'Simulate low-connectivity underground mine pit mode'}
-          className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-            isUndergroundModeActive
-              ? 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A] hover:bg-[#FDE68A]'
-              : 'bg-[#F0FDF4] text-[#166534] border-[#BBF7D0] hover:bg-[#DCFCE7]'
-          }`}
-        >
-          {isUndergroundModeActive ? (
-            <>
-              <WifiOff className="w-3.5 h-3.5 text-[#D97706]" />
-              <span className="font-semibold hidden sm:inline">Underground</span>
-            </>
-          ) : (
-            <>
-              <Wifi className="w-3.5 h-3.5 text-[#16A34A]" />
-              <span className="hidden sm:inline">Cloud</span>
-            </>
-          )}
-        </button>
-
-        {/* Subsidiary Scope Selector */}
-        <div className="flex items-center gap-1 sm:gap-1.5 bg-[#F7F5F0] border border-[#E4E0D6] rounded-lg px-2 sm:px-2.5 py-1">
+      {/* Simplified Top Bar: 3 Core Items (Subsidiary, Offline Mode, User/Role Pill) */}
+      <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+        {/* 1. Subsidiary Scope Selector */}
+        <div className="flex items-center gap-1.5 bg-[#FAF8F3] border border-[#E4E0D6] rounded-lg px-2.5 py-1.5 shadow-2xs">
           <Building2 className="w-3.5 h-3.5 text-[#C8892E]" />
-          <span className="text-[11px] font-medium text-[#64748B] hidden xl:inline">Subsidiary:</span>
           <select
             id="select-subsidiary-scope"
             value={selectedSubsidiary}
             onChange={(e) => setSelectedSubsidiary(e.target.value as Subsidiary | 'ALL')}
-            className="text-xs font-mono font-semibold bg-transparent text-[#141C2B] focus:outline-none cursor-pointer max-w-[80px] sm:max-w-none"
+            className="text-xs font-mono font-bold bg-transparent text-[#141C2B] focus:outline-none cursor-pointer"
+            title="Filter data scope by Subsidiary"
           >
             {SUBSIDIARIES.map((sub) => (
               <option key={sub} value={sub}>
-                {sub === 'ALL' ? 'All Subs' : sub}
+                {sub === 'ALL' ? 'All Subsidiaries' : sub}
               </option>
             ))}
           </select>
         </div>
 
-        {/* Grounding Integrity Pill (Desktop) */}
-        <div className="hidden 2xl:flex items-center gap-2 bg-[#F0FDF4] border border-[#BBF7D0] px-2.5 py-1 rounded-lg text-xs">
-          <ShieldCheck className="w-3.5 h-3.5 text-[#16A34A]" />
-          <div className="text-[11px] text-[#166534] font-medium flex items-center gap-1">
-            <span className="font-mono font-bold">{approvedChunksCount}</span>
-            <span>Approved</span>
-            <span className="w-1 h-1 rounded-full bg-[#16A34A] mx-0.5" />
-            <span className="font-semibold text-[#15803D]">Zero Hallucination</span>
+        {/* 2. Underground Mode Switch */}
+        <button
+          id="btn-toggle-underground-mode"
+          onClick={toggleSimulateOffline}
+          title={isUndergroundModeActive 
+            ? `Underground Mode active (IndexedDB storage: ${cachedDocumentIds.length} files, ${sizeMb} MB). Click to return to Cloud.` 
+            : `Online Cloud Mode. Click to simulate low-connectivity underground mine pit (${cachedDocumentIds.length} files cached).`
+          }
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+            isUndergroundModeActive
+              ? 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A] hover:bg-[#FDE68A]'
+              : 'bg-[#FAF8F3] text-[#141C2B] border-[#E4E0D6] hover:bg-[#EFEBE2]'
+          }`}
+        >
+          {isUndergroundModeActive ? (
+            <>
+              <WifiOff className="w-3.5 h-3.5 text-[#D97706]" />
+              <span className="font-semibold hidden sm:inline">Underground Pit</span>
+            </>
+          ) : (
+            <>
+              <Wifi className="w-3.5 h-3.5 text-[#16A34A]" />
+              <span className="font-semibold hidden sm:inline">Online</span>
+            </>
+          )}
+        </button>
+
+        {/* 3. Current User & Role Pill */}
+        <div 
+          onClick={() => setActiveView('settings')}
+          className="flex items-center gap-2 bg-[#141C2B] text-white px-2.5 sm:px-3 py-1.5 rounded-lg text-xs cursor-pointer hover:bg-[#1E293B] transition-colors shadow-2xs"
+          title={`Logged in as ${currentUser.name} (${currentUser.role.toUpperCase()}) - ${currentUser.subsidiary}. Click to manage settings.`}
+        >
+          <div className="w-5 h-5 rounded-full bg-[#C8892E] text-white flex items-center justify-center font-bold text-[10px] flex-shrink-0">
+            {currentUser.name.charAt(0)}
+          </div>
+          <div className="hidden sm:block text-left">
+            <div className="font-bold text-[11px] leading-tight truncate max-w-[110px]">{currentUser.name}</div>
+            <div className="text-[9px] font-mono text-[#94A3B8] uppercase leading-none">
+              {currentUser.role === 'admin' ? 'Central Admin' : `${currentUser.subsidiary} Officer`}
+            </div>
           </div>
         </div>
       </div>
     </header>
   );
 };
-

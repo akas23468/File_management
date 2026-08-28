@@ -14,7 +14,11 @@ import {
   WifiOff, 
   Check, 
   Play,
-  ShieldCheck
+  ShieldCheck,
+  Database,
+  Layers,
+  FileCheck2,
+  Trash2
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -25,7 +29,10 @@ export const SettingsView: React.FC = () => {
     toggleSimulateOffline,
     cachedDocumentIds,
     precacheAllDocumentsForUnderground,
-    documents
+    offlineStorageSizeBytes,
+    lastOfflineSyncTime,
+    documents,
+    chunks
   } = useApp();
 
   // 1. Theme Setting (Light / Dark)
@@ -248,52 +255,106 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
-        {/* 4. Offline Pit Cache */}
+        {/* 4. Offline Pit Cache & Local Storage Management */}
         <div className="bg-white border border-[#E4E0D6] rounded-xl p-5 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
             <div>
               <h3 className="font-serif font-bold text-sm text-[#141C2B] flex items-center gap-2">
                 <HardDrive className="w-4 h-4 text-[#C8892E]" />
-                <span>Offline Pit & Shaft Cache</span>
+                <span>Offline Storage & Pit Cache</span>
               </h3>
-              <p className="text-xs text-[#64748B] mt-0.5">
-                Store documents locally in browser storage for use inside deep mine pits without internet.
+              <p className="text-xs text-[#64748B] mt-0.5 max-w-xl">
+                Pre-caches approved geological reports, mine plans, and SOP chunks into local browser storage for zero-connectivity underground mine workings.
               </p>
             </div>
 
-            <div className="text-xs font-mono font-bold text-[#166534] bg-[#F0FDF4] border border-[#BBF7D0] px-3 py-1.5 rounded-lg self-start sm:self-auto">
-              {cachedDocumentIds.length} of {documents.length} Docs Offline Ready
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono font-bold text-[#166534] bg-[#DCFCE7] border border-[#BBF7D0] px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5 text-[#16A34A]" />
+                <span>{cachedDocumentIds.length} / {documents.length} Files Cached</span>
+              </span>
             </div>
           </div>
 
-          <div className="pt-3 border-t border-[#EFEBE2] flex flex-wrap gap-2.5">
-            <button
-              type="button"
-              onClick={() => {
-                precacheAllDocumentsForUnderground();
-                sounds.playSuccess();
-              }}
-              className="px-3.5 py-2 bg-[#166534] hover:bg-[#14532D] text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-            >
-              <DownloadCloud className="w-3.5 h-3.5 text-[#86EFAC]" />
-              <span>Pre-cache All Documents</span>
-            </button>
+          {/* Storage Metrics Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+            <div className="bg-[#FAF8F3] border border-[#E4E0D6] rounded-lg p-3">
+              <div className="flex items-center justify-between text-[#64748B] mb-1">
+                <span className="text-[11px] font-medium">Downloaded Files</span>
+                <FileCheck2 className="w-3.5 h-3.5 text-[#C8892E]" />
+              </div>
+              <div className="font-serif font-bold text-lg text-[#141C2B]">
+                {cachedDocumentIds.length} <span className="text-xs font-normal text-[#64748B]">/ {documents.length} docs</span>
+              </div>
+              <div className="text-[10px] text-[#166534] font-medium mt-1">
+                {Math.round((cachedDocumentIds.length / Math.max(1, documents.length)) * 100)}% repository offline ready
+              </div>
+            </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                toggleSimulateOffline();
-                sounds.playClick();
-              }}
-              className={`px-3.5 py-2 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-colors cursor-pointer ${
-                isSimulatedOffline 
-                  ? 'bg-[#141C2B] text-white border-[#141C2B]' 
-                  : 'bg-[#FAF8F3] hover:bg-[#EFEBE2] text-[#141C2B] border-[#E4E0D6]'
-              }`}
-            >
-              {isSimulatedOffline ? <WifiOff className="w-3.5 h-3.5 text-[#F59E0B]" /> : <Wifi className="w-3.5 h-3.5 text-[#16A34A]" />}
-              <span>{isSimulatedOffline ? 'Simulating Offline Mode' : 'Test Offline Disconnect'}</span>
-            </button>
+            <div className="bg-[#FAF8F3] border border-[#E4E0D6] rounded-lg p-3">
+              <div className="flex items-center justify-between text-[#64748B] mb-1">
+                <span className="text-[11px] font-medium">Storage Consumed</span>
+                <HardDrive className="w-3.5 h-3.5 text-[#C8892E]" />
+              </div>
+              <div className="font-serif font-bold text-lg text-[#141C2B]">
+                {((offlineStorageSizeBytes || 0) / (1024 * 1024)).toFixed(2)}{' '}
+                <span className="text-xs font-normal text-[#64748B]">MB</span>
+              </div>
+              <div className="text-[10px] text-[#64748B] font-mono mt-1">
+                ~{Math.round((offlineStorageSizeBytes || 0) / 1024)} KB indexed
+              </div>
+            </div>
+
+            <div className="bg-[#FAF8F3] border border-[#E4E0D6] rounded-lg p-3">
+              <div className="flex items-center justify-between text-[#64748B] mb-1">
+                <span className="text-[11px] font-medium">Knowledge Chunks</span>
+                <Layers className="w-3.5 h-3.5 text-[#C8892E]" />
+              </div>
+              <div className="font-serif font-bold text-lg text-[#141C2B]">
+                {chunks.length}{' '}
+                <span className="text-xs font-normal text-[#64748B]">vectors</span>
+              </div>
+              <div className="text-[10px] text-[#64748B] font-mono mt-1 truncate">
+                Last sync: {lastOfflineSyncTime ? new Date(lastOfflineSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Never'}
+              </div>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="pt-2 border-t border-[#EFEBE2] flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  precacheAllDocumentsForUnderground();
+                  sounds.playSuccess();
+                }}
+                className="px-3.5 py-2 bg-[#166534] hover:bg-[#14532D] text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+              >
+                <DownloadCloud className="w-3.5 h-3.5 text-[#86EFAC]" />
+                <span>Pre-cache All {documents.length} Documents</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  toggleSimulateOffline();
+                  sounds.playClick();
+                }}
+                className={`px-3.5 py-2 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  isSimulatedOffline 
+                    ? 'bg-[#141C2B] text-white border-[#141C2B]' 
+                    : 'bg-[#FAF8F3] hover:bg-[#EFEBE2] text-[#141C2B] border-[#E4E0D6]'
+                }`}
+              >
+                {isSimulatedOffline ? <WifiOff className="w-3.5 h-3.5 text-[#F59E0B]" /> : <Wifi className="w-3.5 h-3.5 text-[#16A34A]" />}
+                <span>{isSimulatedOffline ? 'Simulating Underground Pit' : 'Test Underground Disconnect'}</span>
+              </button>
+            </div>
+
+            <div className="text-[11px] text-[#64748B] font-mono">
+              Role: <span className="font-bold text-[#141C2B] uppercase">{currentUser.role}</span>
+            </div>
           </div>
         </div>
       </div>

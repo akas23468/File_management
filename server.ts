@@ -75,32 +75,115 @@ async function startServer() {
     }
   });
 
-  // API Route: Automated Report Generation
+  // API Route: Automated Report Generation with complete deduplication & grounding
   app.post('/api/ai/report', async (req, res) => {
     try {
       const { reportType, period, subsidiary, selectedChunks, templateTitle } = req.body;
       
-      const chunks = Array.isArray(selectedChunks) ? selectedChunks : [];
-      const sourcesSummary = chunks.map((c: any) => `- ${c.documentTitle} (${c.documentCode} v${c.versionNumber}, ${c.pageOrSheetRef})`).join('\n');
+      const rawChunks = Array.isArray(selectedChunks) ? selectedChunks : [];
+      
+      // 1. Deduplicate chunks by unique text snippet and ID
+      const seenText = new Set<string>();
+      const seenIds = new Set<string>();
+      const chunks: any[] = [];
+      
+      for (const c of rawChunks) {
+        if (!c) continue;
+        const normalizedText = (c.text || '').trim().replace(/\s+/g, ' ');
+        if (!normalizedText) continue;
+        if (seenText.has(normalizedText) || (c.id && seenIds.has(c.id))) {
+          continue;
+        }
+        seenText.add(normalizedText);
+        if (c.id) seenIds.add(c.id);
+        chunks.push(c);
+      }
 
-      const content = `## 1. Statutory Context & Executive Directive
-This ${templateTitle || 'Statutory Compliance Brief'} has been compiled for **${subsidiary || 'All Subsidiaries'}** for period **${period || 'Current FY'}** under direct oversight of CMPDI Knowledge & Verification Directorate.
+      // 2. Deduplicate Source Documents so each document is listed strictly ONCE
+      const docMap = new Map<string, { title: string; code: string; versions: Set<number>; refs: Set<string> }>();
+      for (const c of chunks) {
+        const key = c.documentId || c.documentCode || c.documentTitle;
+        if (!docMap.has(key)) {
+          docMap.set(key, {
+            title: c.documentTitle || 'Technical Filing',
+            code: c.documentCode || 'CMPDI/DOC',
+            versions: new Set(c.versionNumber ? [c.versionNumber] : [1]),
+            refs: new Set(c.pageOrSheetRef ? [c.pageOrSheetRef] : []),
+          });
+        } else {
+          const entry = docMap.get(key)!;
+          if (c.versionNumber) entry.versions.add(c.versionNumber);
+          if (c.pageOrSheetRef) entry.refs.add(c.pageOrSheetRef);
+        }
+      }
+
+      // Handle case where no chunks exist or were provided for subsidiary
+      if (chunks.length === 0) {
+        const content = `## 1. Statutory Context & Executive Directive
+This **${templateTitle || 'Statutory Compliance Brief'}** has been initiated for **${subsidiary || 'All Subsidiaries'}** covering review period **${period || 'Current FY'}**.
+
+---
 
 ## 2. Synthesized Technical Findings
-Based on approved organizational knowledge base filings:
+*No approved statutory technical filings or operational telemetry currently registered in the repository for **${subsidiary}**.*
+
+### Recommendation:
+Please upload and approve relevant technical filings, borehole assays, or safety protocols for **${subsidiary}** in the Document Ingestion Module to enable automated synthesis.
+
+---
+
+## 3. Statutory Action Items
+1. **Repository Notice**: Initiate mandatory submission of latest quarterly returns and statutory SOPs for ${subsidiary}.
+2. **Audit Escalation**: Colliery engineering leadership notified for pending documentation baseline.`;
+
+        return res.json({
+          content,
+          summary: `No approved ${subsidiary} document sources found in repository for synthesis.`,
+          citations: []
+        });
+      }
+
+      const sourcesSummary = Array.from(docMap.values()).map(doc => {
+        const verStr = Array.from(doc.versions).map(v => `v${v}.0`).join(', ');
+        const refsStr = Array.from(doc.refs).filter(Boolean).join(', ');
+        return `- **${doc.title}** (${doc.code} ${verStr}${refsStr ? ` · Ref: ${refsStr}` : ''})`;
+      }).join('\n');
+
+      // 3. Render distinct, non-duplicated detailed observations
+      const observationsMarkdown = chunks.map((c: any, i: number) => {
+        const tag = c.topicTag ? c.topicTag.replace(/_/g, ' ').toUpperCase() : 'VERIFIED OBSERVATION';
+        return `**Point 2.${i + 1} [${tag}]** *(${c.documentCode || 'CMPDI'}, ${c.pageOrSheetRef || 'Archive'})*\n${c.text.trim()}`;
+      }).join('\n\n');
+
+      const content = `## 1. Statutory Context & Executive Directive
+This **${templateTitle || 'Statutory Compliance Brief'}** has been formally compiled for **${subsidiary || 'All Subsidiaries'}** covering review period **${period || 'Current FY'}** under direct statutory oversight of the CMPDI Directorate of Mine Planning & Technology.
+
+---
+
+## 2. Synthesized Technical Findings
+Synthesized strictly against verified, non-duplicate statutory filings in the organizational knowledge repository:
+
 ${sourcesSummary}
 
-### Detailed Observations:
-${chunks.map((c: any, i: number) => `**Point 2.${i + 1} (${c.topicTag || 'Operational Data'}):** ${c.text}`).join('\n\n')}
+### Detailed Observations & Geological/Operational Parameters:
 
-## 3. Statutory Action Items & Next Steps
-1. All respective sub-area managers must cross-check monthly returns against the approved parameters above.
-2. Discrepancies exceeding ±5.0% require immediate DGMS/CMPDI notification.`;
+${observationsMarkdown}
 
-      res.json({
-        content,
-        summary: `Synthesized official ${templateTitle || 'Report'} across ${chunks.length} approved document sources for ${subsidiary}.`,
-        citations: chunks.map((c: any) => ({
+---
+
+## 3. Statutory Action Items & Compliance Directives
+1. **Operational Reconciliation**: Respective Sub-Area General Managers and Colliery Engineers must reconcile shift logs against the approved baseline parameters above.
+2. **Variance Notification**: Volumetric deviations exceeding **±5.0%** in stripping ratios, overburden removal, or coal quality grades require mandatory CMPDI/DGMS notice.
+3. **Statutory Archive**: This synthesized briefing carries digital audit authenticity and is cross-referenced in the MineMind Knowledge Base.`;
+
+      // 4. Deduplicate citations
+      const seenCitationKeys = new Set<string>();
+      const uniqueCitations: any[] = [];
+      for (const c of chunks) {
+        const citKey = `${c.documentId || c.documentCode}_${c.pageOrSheetRef}`;
+        if (seenCitationKeys.has(citKey)) continue;
+        seenCitationKeys.add(citKey);
+        uniqueCitations.push({
           chunkId: c.id,
           documentId: c.documentId,
           documentTitle: c.documentTitle,
@@ -110,7 +193,13 @@ ${chunks.map((c: any, i: number) => `**Point 2.${i + 1} (${c.topicTag || 'Operat
           excerpt: c.text?.slice(0, 140) + '...',
           relevanceScore: 0.98,
           subsidiary: c.subsidiary,
-        }))
+        });
+      }
+
+      res.json({
+        content,
+        summary: `Synthesized official ${templateTitle || 'Report'} across ${docMap.size} unique document sources (${chunks.length} distinct data points) for ${subsidiary}.`,
+        citations: uniqueCitations
       });
     } catch (err: any) {
       console.error('Error in /api/ai/report:', err);

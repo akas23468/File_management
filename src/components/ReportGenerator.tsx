@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { jsPDF } from 'jspdf';
+import Markdown from 'react-markdown';
 import { useApp } from '../context/AppContext';
+import { sounds } from '../utils/soundEffects';
 import { ReportRecord, ReportType, Subsidiary, Chunk, SourceCitation } from '../types';
 import { 
   FileText, 
@@ -19,7 +22,8 @@ import {
   ChevronRight,
   Database,
   Plus,
-  RefreshCw
+  RefreshCw,
+  FileDown
 } from 'lucide-react';
 
 interface ReportTemplate {
@@ -75,13 +79,30 @@ export const ReportGenerator: React.FC = () => {
   const [selectedTemplate, setSelectedTemplate] = useState<ReportType>('production_variance');
   const [reportPeriod, setReportPeriod] = useState<string>('FY 2025-26 (Q3/Q4)');
   const [reportSubsidiary, setReportSubsidiary] = useState<Subsidiary | 'ALL'>('SECL');
-  const [selectedDocIds, setSelectedDocIds] = useState<string[]>(['doc_secl_korba_01', 'doc_ncl_jayant_01']);
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   
   // Generation & Log state
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [genLogs, setGenLogs] = useState<string[]>([]);
   const [generatedReport, setGeneratedReport] = useState<ReportRecord | null>(null);
   const [copiedText, setCopiedText] = useState<boolean>(false);
+
+  // Filter documents by selected subsidiary (or all if 'ALL' or CMPDI HQ standard)
+  const availableDocs = documents.filter(doc => {
+    if (reportSubsidiary === 'ALL') return true;
+    return doc.subsidiary === reportSubsidiary || doc.subsidiary === 'CMPDI HQ';
+  });
+
+  // Automatically update selected document IDs when subsidiary changes
+  useEffect(() => {
+    const matchingApprovedIds = documents
+      .filter(d => {
+        const matchesSub = reportSubsidiary === 'ALL' || d.subsidiary === reportSubsidiary || d.subsidiary === 'CMPDI HQ';
+        return matchesSub && d.status === 'approved';
+      })
+      .map(d => d.id);
+    setSelectedDocIds(matchingApprovedIds);
+  }, [reportSubsidiary, documents]);
 
   // If coming with draft from AI Assistant
   useEffect(() => {
@@ -102,13 +123,24 @@ export const ReportGenerator: React.FC = () => {
     setCurrentStep(5);
 
     const templateMeta = TEMPLATES.find(t => t.id === selectedTemplate);
-    const selectedChunks = chunks.filter(c => c.isApproved && selectedDocIds.includes(c.documentId));
+    
+    // Deduplicate selected chunks by text content and id to avoid redundant citations and duplicate points
+    const seenTexts = new Set<string>();
+    const seenIds = new Set<string>();
+    const selectedChunks = chunks.filter(c => {
+      if (!c.isApproved || !selectedDocIds.includes(c.documentId)) return false;
+      const normalized = (c.text || '').trim().replace(/\s+/g, ' ');
+      if (!normalized || seenTexts.has(normalized) || seenIds.has(c.id)) return false;
+      seenTexts.add(normalized);
+      seenIds.add(c.id);
+      return true;
+    });
 
     // Live extraction simulation logs
     setGenLogs(prev => [...prev, `[INIT] Validating ${selectedDocIds.length} approved document sources for ${reportSubsidiary}...`]);
     await new Promise(r => setTimeout(r, 600));
 
-    setGenLogs(prev => [...prev, `[EXTRACT] Sourcing ${selectedChunks.length} vector chunks from approved repository...`]);
+    setGenLogs(prev => [...prev, `[EXTRACT] Sourcing ${selectedChunks.length} unique vector chunks from approved repository...`]);
     await new Promise(r => setTimeout(r, 700));
 
     setGenLogs(prev => [...prev, `[SYNTHESIS] Cross-checking reserve parameters, borehole assays, and DGMS setback constraints...`]);
@@ -160,8 +192,198 @@ export const ReportGenerator: React.FC = () => {
     }
   };
 
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+
+  const handleDownloadPdf = async () => {
+    if (!generatedReport) return;
+    setIsExportingPdf(true);
+
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 18;
+      const maxLineWidth = pageWidth - margin * 2;
+      let yPos = 20;
+
+      const checkPageBreak = (neededHeight: number) => {
+        if (yPos + neededHeight > pageHeight - 20) {
+          doc.addPage();
+          yPos = 20;
+          drawHeaderFooter();
+        }
+      };
+
+      const drawHeaderFooter = () => {
+        // Top header accent line
+        doc.setDrawColor(200, 137, 46); // #C8892E
+        doc.setLineWidth(1.2);
+        doc.line(margin, 10, pageWidth - margin, 10);
+
+        // Top header text
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(100, 116, 139);
+        doc.text('CENTRAL MINE PLANNING & DESIGN INSTITUTE (CMPDI) — STATUTORY BRIEF', margin, 8);
+        doc.text(generatedReport.reportCode, pageWidth - margin, 8, { align: 'right' });
+
+        // Bottom page number
+        const pageCount = doc.getNumberOfPages();
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(`Page ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+        doc.text('CONFIDENTIAL — STATUTORY MINING GOVERNANCE', margin, pageHeight - 10);
+      };
+
+      // Header on page 1
+      drawHeaderFooter();
+
+      // Title
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.setTextColor(20, 28, 43);
+      const splitTitle = doc.splitTextToSize(generatedReport.title, maxLineWidth);
+      doc.text(splitTitle, margin, yPos);
+      yPos += splitTitle.length * 7 + 4;
+
+      // Metadata block
+      doc.setFillColor(247, 245, 240);
+      doc.setDrawColor(228, 224, 214);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(margin, yPos, maxLineWidth, 14, 2, 2, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(20, 28, 43);
+      doc.text(`Code: ${generatedReport.reportCode}`, margin + 4, yPos + 6);
+      doc.text(`Subsidiary: ${generatedReport.subsidiary}`, margin + 65, yPos + 6);
+      doc.text(`Period: ${generatedReport.period}`, margin + 115, yPos + 6);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Date: ${new Date(generatedReport.createdAt).toLocaleDateString()} | Author: ${generatedReport.generatedBy.name} (${generatedReport.generatedBy.role})`, margin + 4, yPos + 11);
+      yPos += 20;
+
+      // Parse markdown content line by line
+      const lines = generatedReport.content.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          yPos += 3;
+          continue;
+        }
+
+        if (trimmed.startsWith('## ')) {
+          checkPageBreak(16);
+          yPos += 4;
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(12);
+          doc.setTextColor(20, 28, 43);
+          const heading = trimmed.replace(/^##\s+/, '').replace(/\*\*/g, '');
+          doc.text(heading, margin, yPos);
+          yPos += 5.5;
+          doc.setDrawColor(200, 137, 46);
+          doc.setLineWidth(0.4);
+          doc.line(margin, yPos - 1, margin + 35, yPos - 1);
+          yPos += 2;
+        } else if (trimmed.startsWith('### ')) {
+          checkPageBreak(12);
+          yPos += 3;
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10.5);
+          doc.setTextColor(30, 41, 59);
+          const subHeading = trimmed.replace(/^###\s+/, '').replace(/\*\*/g, '');
+          doc.text(subHeading, margin, yPos);
+          yPos += 5;
+        } else if (trimmed.startsWith('---')) {
+          checkPageBreak(6);
+          doc.setDrawColor(228, 224, 214);
+          doc.setLineWidth(0.3);
+          doc.line(margin, yPos, pageWidth - margin, yPos);
+          yPos += 5;
+        } else {
+          checkPageBreak(10);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9.5);
+          doc.setTextColor(30, 41, 59);
+          const cleanText = trimmed.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1');
+          const splitParagraph = doc.splitTextToSize(cleanText, maxLineWidth);
+          doc.text(splitParagraph, margin, yPos);
+          yPos += splitParagraph.length * 4.6 + 2;
+        }
+      }
+
+      // Citations
+      if (generatedReport.citations && generatedReport.citations.length > 0) {
+        checkPageBreak(25);
+        yPos += 6;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(20, 28, 43);
+        doc.text('Attached Statutory Citations & Vector Proofs', margin, yPos);
+        yPos += 5;
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(71, 85, 105);
+
+        for (const cit of generatedReport.citations) {
+          checkPageBreak(12);
+          const citText = `• ${cit.documentTitle} [${cit.documentCode} v${cit.versionNumber}, ${cit.pageOrSheetRef}]: "${cit.excerpt}"`;
+          const splitCit = doc.splitTextToSize(citText, maxLineWidth);
+          doc.text(splitCit, margin + 2, yPos);
+          yPos += splitCit.length * 4 + 2;
+        }
+      }
+
+      // Save PDF via Blob to guarantee browser download
+      const pdfBlob = doc.output('blob');
+      const blobUrl = URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `${generatedReport.reportCode}_${generatedReport.subsidiary}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+
+      sounds.playSuccess();
+    } catch (err) {
+      console.error('PDF export failed, falling back to window.print():', err);
+      window.print();
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   const handlePrintOrExport = () => {
-    window.print();
+    handleDownloadPdf();
+  };
+
+  const handleDownloadMarkdown = () => {
+    if (!generatedReport) return;
+    const blob = new Blob([
+      `# ${generatedReport.title}\n` +
+      `**Report Code:** ${generatedReport.reportCode} | **Period:** ${generatedReport.period} | **Date:** ${new Date(generatedReport.createdAt).toLocaleDateString()}\n\n` +
+      `---\n\n` +
+      `${generatedReport.content}\n\n` +
+      `---\n### Attached Citations\n` +
+      generatedReport.citations.map(c => `- **${c.documentTitle}** (${c.documentCode} v${c.versionNumber}, ${c.pageOrSheetRef}): "${c.excerpt}"`).join('\n')
+    ], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${generatedReport.reportCode}_${generatedReport.subsidiary}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const handleCopyReport = () => {
@@ -213,23 +435,35 @@ export const ReportGenerator: React.FC = () => {
                 { num: 3, label: 'Subsidiary', short: '3. Sub' },
                 { num: 4, label: 'Sources', short: '4. Docs' },
                 { num: 5, label: 'Synthesis', short: '5. Synth' },
-              ].map(s => (
-                <button 
-                  key={s.num}
-                  type="button"
-                  onClick={() => setCurrentStep(s.num)}
-                  className={`p-1.5 sm:p-2 rounded-lg transition-all cursor-pointer ${
-                    currentStep === s.num 
-                      ? 'bg-[#141C2B] text-[#C8892E] font-bold shadow-xs' 
-                      : currentStep > s.num
-                        ? 'bg-[#F0FDF4] hover:bg-[#DCFCE7] text-[#16A34A] font-semibold'
-                        : 'text-[#94A3B8] bg-[#FAF8F3] hover:bg-[#EFEBE2]'
-                  }`}
-                >
-                  <span className="hidden sm:inline">{s.num}. {s.label}</span>
-                  <span className="sm:hidden">{s.short}</span>
-                </button>
-              ))}
+              ].map(s => {
+                const isCurrent = currentStep === s.num;
+                const isCompleted = currentStep > s.num || (s.num === 5 && Boolean(generatedReport));
+                const canNavigate = s.num <= currentStep || isCompleted;
+
+                return (
+                  <button 
+                    key={s.num}
+                    type="button"
+                    disabled={!canNavigate}
+                    onClick={() => {
+                      if (canNavigate) {
+                        setCurrentStep(s.num);
+                        sounds.playClick();
+                      }
+                    }}
+                    className={`p-1.5 sm:p-2 rounded-lg transition-all ${
+                      isCurrent 
+                        ? 'bg-[#141C2B] text-[#C8892E] font-bold shadow-xs cursor-default' 
+                        : isCompleted
+                          ? 'bg-[#F0FDF4] hover:bg-[#DCFCE7] text-[#16A34A] font-semibold cursor-pointer'
+                          : 'text-[#94A3B8] bg-[#FAF8F3] opacity-60 cursor-not-allowed'
+                    }`}
+                  >
+                    <span className="hidden sm:inline">{s.num}. {s.label}</span>
+                    <span className="sm:hidden">{s.short}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -420,72 +654,104 @@ export const ReportGenerator: React.FC = () => {
             <div className="bg-white border border-[#E4E0D6] rounded-xl p-6 shadow-xs space-y-4">
               <div className="pb-3 border-b border-[#EFEBE2] flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h3 className="font-serif font-bold text-lg text-[#141C2B]">
-                    Approved Document Knowledge Sources
-                  </h3>
-                  <p className="text-xs text-[#64748B]">
-                    Click documents to toggle citations. The AI will strictly cite selected verified filings.
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-serif font-bold text-lg text-[#141C2B]">
+                      Approved Knowledge Sources
+                    </h3>
+                    <span className="font-mono text-xs bg-[#141C2B] text-[#C8892E] px-2 py-0.5 rounded font-bold">
+                      {reportSubsidiary}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#64748B] mt-0.5">
+                    {reportSubsidiary === 'ALL' 
+                      ? 'Showing approved documents across all CIL subsidiaries.' 
+                      : `Filtered strictly to approved ${reportSubsidiary} filings and CMPDI HQ statutory standards.`}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setSelectedDocIds(documents.map(d => d.id))}
-                    className="text-[11px] font-mono text-[#C8892E] hover:underline"
+                    onClick={() => setSelectedDocIds(availableDocs.filter(d => d.status === 'approved').map(d => d.id))}
+                    className="text-[11px] font-mono text-[#C8892E] hover:underline cursor-pointer"
                   >
-                    Select All
+                    Select All {reportSubsidiary}
+                  </button>
+                  <span className="text-[#94A3B8]">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDocIds([])}
+                    className="text-[11px] font-mono text-[#64748B] hover:underline cursor-pointer"
+                  >
+                    Deselect All
                   </button>
                   <span className="text-[#94A3B8]">|</span>
                   <span className="text-xs font-mono bg-[#EFEBE2] px-2 py-1 rounded text-[#141C2B] font-bold">
-                    {selectedDocIds.length} selected
+                    {selectedDocIds.length} of {availableDocs.length} selected
                   </span>
                 </div>
               </div>
 
-              <div className="space-y-2.5 max-h-80 overflow-y-auto">
-                {documents.map(doc => {
-                  const isChecked = selectedDocIds.includes(doc.id);
-                  const isApproved = doc.status === 'approved';
+              {availableDocs.length === 0 ? (
+                <div className="p-8 text-center bg-[#FAF8F3] rounded-xl border border-dashed border-[#D4CEBF]">
+                  <Database className="w-8 h-8 text-[#94A3B8] mx-auto mb-2 opacity-60" />
+                  <p className="text-sm font-bold text-[#141C2B]">No {reportSubsidiary} filings currently registered in knowledge repository</p>
+                  <p className="text-xs text-[#64748B] mt-1">Upload and approve a statutory document for {reportSubsidiary} in the Document Ingestion view to include it in this report.</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5 max-h-80 overflow-y-auto">
+                  {availableDocs.map(doc => {
+                    const isChecked = selectedDocIds.includes(doc.id);
+                    const isApproved = doc.status === 'approved';
 
-                  return (
-                    <div
-                      key={doc.id}
-                      onClick={() => handleToggleDoc(doc.id)}
-                      className={`p-3.5 rounded-lg border cursor-pointer flex items-start gap-3 transition-all ${
-                        isChecked 
-                          ? 'bg-[#FAF8F3] border-[#C8892E]' 
-                          : 'bg-white border-[#E4E0D6] hover:border-[#C8892E]'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => {}}
-                        className="mt-0.5 rounded text-[#C8892E] focus:ring-0 cursor-pointer"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="font-mono text-[10px] font-bold bg-[#EFEBE2] px-1.5 py-0.5 rounded text-[#141C2B]">
-                            {doc.documentCode}
-                          </span>
-                          <span className="font-mono text-[10px] text-[#64748B]">
-                            {doc.subsidiary}
-                          </span>
-                          {isApproved && (
-                            <span className="text-[10px] font-mono font-bold text-[#16A34A] bg-[#F0FDF4] px-1.5 py-0.5 rounded">
-                              ✓ Approved v{doc.versions[0]?.versionNumber}.0
+                    return (
+                      <div
+                        key={doc.id}
+                        onClick={() => handleToggleDoc(doc.id)}
+                        className={`p-3.5 rounded-lg border cursor-pointer flex items-start gap-3 transition-all ${
+                          isChecked 
+                            ? 'bg-[#FAF8F3] border-[#C8892E]' 
+                            : 'bg-white border-[#E4E0D6] hover:border-[#C8892E]'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {}}
+                          className="mt-0.5 rounded text-[#C8892E] focus:ring-0 cursor-pointer"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="font-mono text-[10px] font-bold bg-[#EFEBE2] px-1.5 py-0.5 rounded text-[#141C2B]">
+                              {doc.documentCode}
                             </span>
-                          )}
+                            <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                              doc.subsidiary === 'BCCL' ? 'bg-[#EFF6FF] text-[#1D4ED8]' :
+                              doc.subsidiary === 'SECL' ? 'bg-[#FEF3C7] text-[#B45309]' :
+                              doc.subsidiary === 'NCL' ? 'bg-[#F0FDF4] text-[#15803D]' :
+                              'bg-[#EFEBE2] text-[#64748B]'
+                            }`}>
+                              {doc.subsidiary}
+                            </span>
+                            {isApproved ? (
+                              <span className="text-[10px] font-mono font-bold text-[#16A34A] bg-[#F0FDF4] px-1.5 py-0.5 rounded">
+                                ✓ Approved v{doc.versions[0]?.versionNumber}.0
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-mono font-bold text-[#DC2626] bg-[#FEF2F2] px-1.5 py-0.5 rounded">
+                                ⚠ {doc.status}
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="text-xs font-bold text-[#141C2B] truncate">{doc.title}</h4>
+                          <p className="text-[11px] text-[#64748B] truncate mt-0.5">
+                            {doc.versions[0]?.extractedText.slice(0, 110)}...
+                          </p>
                         </div>
-                        <h4 className="text-xs font-bold text-[#141C2B] truncate">{doc.title}</h4>
-                        <p className="text-[11px] text-[#64748B] truncate mt-0.5">
-                          {doc.versions[0]?.extractedText.slice(0, 110)}...
-                        </p>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
 
               <div className="flex justify-between items-center pt-4 border-t border-[#EFEBE2]">
                 <button
@@ -548,30 +814,41 @@ export const ReportGenerator: React.FC = () => {
                     </div>
 
                     {/* Actions Toolbar */}
-                    <div className="flex items-center gap-2 print:hidden">
+                    <div className="flex flex-wrap items-center gap-2 print:hidden">
                       <button
                         onClick={handleCopyReport}
-                        className="px-3 py-1.5 bg-[#FAF8F3] hover:bg-[#EFEBE2] border border-[#E4E0D6] text-xs font-semibold rounded-lg flex items-center gap-1.5"
+                        className="px-3 py-1.5 bg-[#FAF8F3] hover:bg-[#EFEBE2] border border-[#E4E0D6] text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Copy raw markdown to clipboard"
                       >
                         {copiedText ? <Check className="w-3.5 h-3.5 text-[#16A34A]" /> : <Copy className="w-3.5 h-3.5 text-[#64748B]" />}
                         <span>{copiedText ? 'Copied' : 'Copy'}</span>
                       </button>
 
                       <button
-                        onClick={handlePrintOrExport}
-                        className="px-4 py-2 bg-[#141C2B] text-white hover:bg-[#1E293B] text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-xs"
+                        id="btn-export-report-pdf"
+                        onClick={handleDownloadPdf}
+                        disabled={isExportingPdf}
+                        className="px-4 py-2 bg-[#141C2B] text-white hover:bg-[#1E293B] text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                        title="Download standard PDF file directly to your computer"
                       >
-                        <Download className="w-3.5 h-3.5 text-[#C8892E]" />
-                        <span>Export PDF / Print</span>
+                        {isExportingPdf ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 text-[#C8892E] animate-spin" />
+                            <span>Creating PDF...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-3.5 h-3.5 text-[#C8892E]" />
+                            <span>Download PDF</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
 
-                  {/* Report Content Body */}
-                  <div className="prose prose-sm max-w-none text-[#141C2B] space-y-4 font-sans leading-relaxed">
-                    <div className="whitespace-pre-line bg-[#FAF8F3] p-5 rounded-lg border border-[#E4E0D6]">
-                      {generatedReport.content}
-                    </div>
+                  {/* Report Content Body with Rich Markdown Rendering */}
+                  <div className="report-markdown-body bg-[#FAF8F3] p-6 sm:p-8 rounded-xl border border-[#E4E0D6] shadow-xs">
+                    <Markdown>{generatedReport.content}</Markdown>
                   </div>
 
                   {/* Grounded Source Citations List (Section 5.7 Spec) */}

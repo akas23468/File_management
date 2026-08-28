@@ -1101,6 +1101,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const approveVersion = async (docId: string, versionId: string, note?: string) => {
     let updatedDocTitle = '';
     let updatedVersionNum = 1;
+    let submitterName = '';
     let newChunksCreated: Chunk[] = [];
 
     setDocuments(prev => prev.map(doc => {
@@ -1109,12 +1110,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const updatedVersions = doc.versions.map(v => {
           if (v.id === versionId) {
             updatedVersionNum = v.versionNumber;
+            submitterName = v.uploadedBy.name;
             return {
               ...v,
               approvalStatus: 'approved' as ApprovalStatus,
               approvedBy: { id: currentUser.id, name: currentUser.name },
               approvedAt: new Date().toISOString(),
-              reviewerNote: note,
+              reviewedBy: { id: currentUser.id, name: currentUser.name },
+              reviewedAt: new Date().toISOString(),
+              reviewerNote: note || 'Statutory verification criteria satisfied. Approved for production knowledge base.',
             };
           }
           return v;
@@ -1169,7 +1173,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       occurrences: t.occurrences + 1,
     })));
 
-    logAuditAction('APPROVE_VERSION', `Approved version v${updatedVersionNum}. Re-indexed AI Knowledge Base chunks.${note ? ` Note: ${note}` : ''}`, docId, updatedDocTitle, updatedVersionNum);
+    logAuditAction('APPROVE_VERSION', `Approved version v${updatedVersionNum} (Submitted by ${submitterName || 'Officer'}). Reviewed by ${currentUser.name}. ${note ? `Reviewer Note: ${note}` : 'Verification Approved.'}`, docId, updatedDocTitle, updatedVersionNum);
     logAuditAction('REINDEX_KB', `Auto-reindexed knowledge vectors for ${updatedDocTitle} v${updatedVersionNum}`, docId, updatedDocTitle, updatedVersionNum);
 
     setToastMessage({ 
@@ -1185,6 +1189,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const rejectVersion = async (docId: string, versionId: string, reason: string) => {
     let docTitle = '';
     let versionNum = 1;
+    let submitterName = '';
 
     setDocuments(prev => prev.map(doc => {
       if (doc.id === docId) {
@@ -1194,10 +1199,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           versions: doc.versions.map(v => {
             if (v.id === versionId) {
               versionNum = v.versionNumber;
+              submitterName = v.uploadedBy.name;
               return {
                 ...v,
                 approvalStatus: 'rejected' as ApprovalStatus,
                 rejectedReason: reason,
+                reviewerNote: reason,
+                reviewedBy: { id: currentUser.id, name: currentUser.name },
+                reviewedAt: new Date().toISOString(),
               };
             }
             return v;
@@ -1207,7 +1216,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return doc;
     }));
 
-    logAuditAction('REJECT_VERSION', `Rejected v${versionNum}. Reason: ${reason}`, docId, docTitle, versionNum);
+    logAuditAction('REJECT_VERSION', `Rejected v${versionNum} (Submitted by ${submitterName || 'Officer'}). Reviewed by ${currentUser.name}. Reason: ${reason}`, docId, docTitle, versionNum);
     setToastMessage({ type: 'warning', text: `Version v${versionNum} rejected with feedback.` });
 
     if (isSupabaseConfigured && !isUndergroundModeActive) {
@@ -1218,6 +1227,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const requestChangesVersion = async (docId: string, versionId: string, note: string) => {
     let docTitle = '';
     let versionNum = 1;
+    let submitterName = '';
 
     setDocuments(prev => prev.map(doc => {
       if (doc.id === docId) {
@@ -1227,10 +1237,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           versions: doc.versions.map(v => {
             if (v.id === versionId) {
               versionNum = v.versionNumber;
+              submitterName = v.uploadedBy.name;
               return {
                 ...v,
                 approvalStatus: 'changes_requested' as ApprovalStatus,
                 changesRequestedNote: note,
+                reviewerNote: note,
+                reviewedBy: { id: currentUser.id, name: currentUser.name },
+                reviewedAt: new Date().toISOString(),
               };
             }
             return v;
@@ -1240,7 +1254,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return doc;
     }));
 
-    logAuditAction('REQUEST_CHANGES', `Requested changes on v${versionNum}. Note: ${note}`, docId, docTitle, versionNum);
+    logAuditAction('REQUEST_CHANGES', `Requested changes on v${versionNum} (Submitted by ${submitterName || 'Officer'}). Reviewed by ${currentUser.name}. Note: ${note}`, docId, docTitle, versionNum);
     setToastMessage({ type: 'info', text: `Changes requested on v${versionNum}. Employee notified.` });
 
     if (isSupabaseConfigured && !isUndergroundModeActive) {

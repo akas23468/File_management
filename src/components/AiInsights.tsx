@@ -10,7 +10,8 @@ import {
   Legend, 
   CartesianGrid,
   BarChart,
-  Bar
+  Bar,
+  Cell
 } from 'recharts';
 import { 
   TrendingUp, 
@@ -24,7 +25,8 @@ import {
   Filter, 
   ShieldCheck, 
   ArrowUpRight,
-  HelpCircle
+  HelpCircle,
+  BarChart3
 } from 'lucide-react';
 
 export const AiInsights: React.FC = () => {
@@ -39,8 +41,6 @@ export const AiInsights: React.FC = () => {
     chunks,
     setToastMessage
   } = useApp();
-
-  const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
 
   const handleTopicClick = (topicName: string) => {
     setActiveTopicFilter(topicName);
@@ -75,10 +75,18 @@ export const AiInsights: React.FC = () => {
     }
   };
 
+  // Prepare data for Topic Coverage Bar Chart
+  const coverageData = topicInsights.map((t) => ({
+    topic: t.topic.length > 18 ? `${t.topic.slice(0, 16)}…` : t.topic,
+    fullTopic: t.topic,
+    occurrences: t.occurrences,
+    confidence: t.confidence
+  }));
+
   return (
-    <div id="ai-insights-view" className="p-4 sm:p-6 md:p-8 space-y-5 sm:space-y-7 max-w-7xl mx-auto">
+    <div id="ai-insights-view" className="p-4 sm:p-6 md:p-8 space-y-6 max-w-7xl mx-auto">
       {/* Header Banner */}
-      <div className="bg-[#141C2B] text-white border border-[#1E293B] rounded-xl p-4 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-[#141C2B] text-white border border-[#1E293B] rounded-xl p-5 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-mono text-[#C8892E] font-bold uppercase tracking-wider mb-1">
             <Sparkles className="w-4 h-4 text-[#C8892E]" />
@@ -92,14 +100,83 @@ export const AiInsights: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 font-mono text-xs text-[#CBD5E1] bg-[#192234] px-3 py-1.5 rounded-lg border border-[#334155]">
-          <ShieldCheck className="w-3.5 h-3.5 text-[#22C55E]" />
-          <span>Active Ontology: 12 Technical Clusters</span>
+        <div className="flex items-center gap-2 font-mono text-xs text-[#CBD5E1] bg-[#192234] px-3.5 py-2 rounded-lg border border-[#334155]">
+          <ShieldCheck className="w-4 h-4 text-[#22C55E]" />
+          <span>Active Ontology: {topicInsights.length} Technical Clusters</span>
+        </div>
+      </div>
+
+      {/* Topic Coverage Bar Chart with Overflow Visible & High Z-Index Tooltips */}
+      <div className="bg-white border border-[#E4E0D6] rounded-xl p-6 shadow-xs space-y-4 relative z-10 overflow-visible">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#EFEBE2] gap-2">
+          <div>
+            <h3 className="font-serif font-bold text-base text-[#141C2B] flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-[#C8892E]" />
+              <span>Topic Coverage & Frequency Across Approved Records</span>
+            </h3>
+            <p className="text-xs text-[#64748B] mt-0.5">
+              Quantified citations and extraction density across all statutory filings in the CMPDI repository.
+            </p>
+          </div>
+          <span className="text-xs font-mono text-[#64748B]">
+            Interactive Distribution
+          </span>
+        </div>
+
+        <div className="h-64 w-full pt-2 relative z-20 overflow-visible">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart 
+              data={coverageData} 
+              margin={{ top: 10, right: 20, left: 0, bottom: 25 }}
+              onClick={(data: any) => {
+                if (data && data.activePayload && data.activePayload[0]) {
+                  const topic = data.activePayload[0].payload.fullTopic;
+                  handleTopicClick(topic);
+                }
+              }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#E4E0D6" vertical={false} />
+              <XAxis 
+                dataKey="topic" 
+                stroke="#64748B" 
+                fontSize={10} 
+                fontFamily="monospace" 
+                tickLine={false}
+                angle={-25}
+                textAnchor="end"
+                interval={0}
+              />
+              <YAxis stroke="#64748B" fontSize={11} fontFamily="monospace" tickLine={false} axisLine={false} />
+              <Tooltip 
+                allowEscapeViewBox={{ x: true, y: true }}
+                wrapperStyle={{ zIndex: 100, pointerEvents: 'none' }}
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    const d = payload[0].payload;
+                    return (
+                      <div className="bg-[#141C2B] text-white p-3 rounded-lg shadow-xl border border-[#334155] text-xs font-mono z-50 pointer-events-none">
+                        <div className="font-bold text-[#C8892E] mb-1">{d.fullTopic}</div>
+                        <div className="text-[#E2E8F0]">Occurrences: <span className="font-bold text-white">{d.occurrences}</span> references</div>
+                        <div className="text-[#94A3B8]">Extraction Confidence: <span className="font-bold text-[#22C55E]">{d.confidence}%</span></div>
+                        <div className="text-[10px] text-[#94A3B8] mt-1.5 pt-1.5 border-t border-[#334155]">Click bar to filter Knowledge Center</div>
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+              <Bar dataKey="occurrences" fill="#C8892E" radius={[4, 4, 0, 0]} className="cursor-pointer hover:opacity-85">
+                {coverageData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#C8892E' : '#141C2B'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </div>
 
       {/* Grid: Interactive Keyword Cluster Cloud & Topics Confidence List */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 relative z-0">
         {/* Visual Topic Cloud: 5 Cols */}
         <div className="lg:col-span-5 bg-white border border-[#E4E0D6] rounded-xl p-6 shadow-xs flex flex-col justify-between">
           <div>
@@ -112,7 +189,6 @@ export const AiInsights: React.FC = () => {
 
             <div className="flex flex-wrap gap-2.5 items-center justify-center p-4 bg-[#FAF8F3] rounded-xl border border-[#E4E0D6] min-h-[220px]">
               {topicInsights.map((t, idx) => {
-                // Size scale based on occurrences
                 const scaleClasses = [
                   'text-base font-bold bg-[#141C2B] text-[#C8892E] px-3 py-1.5 shadow-xs',
                   'text-sm font-bold bg-white text-[#141C2B] border border-[#C8892E] px-2.5 py-1',
@@ -197,7 +273,7 @@ export const AiInsights: React.FC = () => {
       </div>
 
       {/* Temporal Trends Over Time (Recharts) */}
-      <div className="bg-white border border-[#E4E0D6] rounded-xl p-6 shadow-xs space-y-4">
+      <div className="bg-white border border-[#E4E0D6] rounded-xl p-6 shadow-xs space-y-4 relative z-0 overflow-visible">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#EFEBE2] gap-2">
           <div>
             <h3 className="font-serif font-bold text-base text-[#141C2B] flex items-center gap-2">
@@ -205,7 +281,7 @@ export const AiInsights: React.FC = () => {
               <span>Topic Ingestion & Exploration Frequency (Monthly Aggregation: Apr 2025 – Feb 2026)</span>
             </h3>
             <p className="text-xs text-[#64748B] mt-0.5">
-              Compiled continuously on the 1st of every month from technical search logs, repository uploads, and DGMS compliance reviews. Noticeable spike in "Groundwater Seepage" and "Slope Stability" queries during and after monsoon season.
+              Compiled continuously on the 1st of every month from technical search logs, repository uploads, and DGMS compliance reviews.
             </p>
           </div>
 
@@ -213,19 +289,18 @@ export const AiInsights: React.FC = () => {
             <span className="text-[11px] font-mono bg-[#FEF3C7] text-[#92400E] px-2 py-1 rounded border border-[#FDE68A] font-semibold">
               Seasonal Inundation Anomaly Detected (Sep 2025)
             </span>
-            <span className="text-[10px] font-mono text-[#64748B]">
-              Updated: Monthly Batch Pipeline • Live
-            </span>
           </div>
         </div>
 
-        <div className="h-80 w-full min-h-[300px] pt-2">
+        <div className="h-80 w-full min-h-[300px] pt-2 relative z-10 overflow-visible">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={topicTrends} margin={{ top: 15, right: 30, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E4E0D6" vertical={false} />
               <XAxis dataKey="month" stroke="#64748B" fontSize={11} fontFamily="monospace" tickLine={false} />
               <YAxis stroke="#64748B" fontSize={11} fontFamily="monospace" tickLine={false} axisLine={false} />
               <Tooltip 
+                allowEscapeViewBox={{ x: true, y: true }}
+                wrapperStyle={{ zIndex: 100 }}
                 contentStyle={{ 
                   backgroundColor: '#141C2B', 
                   borderColor: '#334155', 
@@ -250,7 +325,7 @@ export const AiInsights: React.FC = () => {
         </div>
       </div>
 
-      {/* "Frequently Asked" Panel with Staleness Detection (Section 5.8 Spec) */}
+      {/* Frequently Asked Panel with Staleness Detection */}
       <div className="bg-white border border-[#E4E0D6] rounded-xl p-6 shadow-xs space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-[#EFEBE2]">
           <div>
@@ -277,7 +352,6 @@ export const AiInsights: React.FC = () => {
                   : 'bg-[#FAF8F3] border-[#E4E0D6]'
               }`}
             >
-              {/* Header */}
               <div className="flex items-start justify-between gap-2 mb-2">
                 <span className="text-xs font-bold text-[#141C2B] line-clamp-2">
                   Q: {q.questionText}
@@ -295,12 +369,10 @@ export const AiInsights: React.FC = () => {
                 )}
               </div>
 
-              {/* Answer snippet */}
               <p className="text-xs text-[#475569] leading-relaxed bg-white p-3 rounded-lg border border-[#E4E0D6]/70 mb-3">
                 {q.answerText}
               </p>
 
-              {/* Staleness Warning & Re-run Action */}
               {q.isStale ? (
                 <div className="p-2.5 bg-[#FEF2F2] rounded-lg border border-[#FECACA] flex items-center justify-between gap-2 text-xs text-[#991B1B]">
                   <span className="text-[11px] font-medium">
@@ -308,7 +380,7 @@ export const AiInsights: React.FC = () => {
                   </span>
                   <button
                     onClick={() => handleRerunStaleQuery(q)}
-                    className="px-2.5 py-1 bg-[#DC2626] hover:bg-[#B91C1C] text-white rounded text-[11px] font-bold flex items-center gap-1 flex-shrink-0"
+                    className="px-2.5 py-1 bg-[#DC2626] hover:bg-[#B91C1C] text-white rounded text-[11px] font-bold flex items-center gap-1 flex-shrink-0 cursor-pointer"
                   >
                     <RefreshCw className="w-3 h-3" />
                     <span>Re-run Query</span>
@@ -320,7 +392,7 @@ export const AiInsights: React.FC = () => {
                   {q.citations[0] && (
                     <button
                       onClick={() => setActiveCitationForModal(q.citations[0])}
-                      className="text-[#C8892E] hover:underline"
+                      className="text-[#C8892E] hover:underline cursor-pointer"
                     >
                       View Source: {q.citations[0].documentCode} →
                     </button>

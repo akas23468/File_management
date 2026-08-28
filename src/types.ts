@@ -94,6 +94,12 @@ export interface DocumentVersion {
     name: string;
   };
   approvedAt?: string;
+  reviewedBy?: {
+    id: string;
+    name: string;
+  };
+  reviewedAt?: string;
+  reviewerNote?: string;
   rejectedReason?: string;
   changesRequestedNote?: string;
   extractedText: string;

@@ -46,19 +46,21 @@ export const Sidebar: React.FC = () => {
     urgentBadge?: number;
   }
 
-  // Employee menu entries (as specified strictly in Section 4)
+  // Employee menu entries (including Settings)
   const employeeNavItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'knowledge', label: 'Knowledge Center', icon: BookOpen },
     { id: 'ai-assistant', label: 'AI Assistant', icon: Sparkles },
     { id: 'my-updates', label: 'My Updates', icon: Clock },
     { id: 'reports', label: 'Reports', icon: FileText },
+    { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
   // Admin menu entries (as specified strictly in Section 4)
   const adminNavItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'knowledge', label: 'Knowledge Center', icon: BookOpen },
+    { id: 'ai-assistant', label: 'AI Assistant', icon: Sparkles },
     { id: 'approval-queue', label: 'Approval Queue', icon: CheckSquare, badge: pendingApprovalsCount, urgentBadge: urgentApprovalsCount },
     { id: 'ai-insights', label: 'AI Insights', icon: TrendingUp },
     { id: 'reports', label: 'Reports', icon: FileText },
