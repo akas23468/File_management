@@ -2,7 +2,8 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
-import { askGroundedKnowledge } from './src/server/geminiRAG';
+import { askGroundedKnowledge } from './src/server/grokRAG';
+import { generateAccurateDocumentSummary } from './src/server/aiSummarizer';
 
 dotenv.config();
 
@@ -16,8 +17,9 @@ async function startServer() {
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
-      service: 'Khanij AI Knowledge & Reporting Engine',
-      hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+      service: 'MineMind AI Knowledge & Reporting Engine (xAI Grok Powered)',
+      hasXAIKey: Boolean(process.env.XAI_API_KEY),
+      provider: 'xai-grok',
       timestamp: new Date().toISOString(),
     });
   });
@@ -45,6 +47,31 @@ async function startServer() {
         citations: [],
         confidence: 0,
       });
+    }
+  });
+
+  // API Route: Accurate AI Document Summary & Extraction
+  app.post('/api/ai/summarize-document', async (req, res) => {
+    try {
+      const { fileName, fileSize, extractedText, documentType, subsidiary, isUpdateFlow, targetDocTitle } = req.body;
+      if (!fileName) {
+        return res.status(400).json({ error: 'fileName is required' });
+      }
+
+      const summaryResult = await generateAccurateDocumentSummary({
+        fileName,
+        fileSize: fileSize || '12.4 MB',
+        extractedText: extractedText || '',
+        documentType,
+        subsidiary,
+        isUpdateFlow,
+        targetDocTitle,
+      });
+
+      res.json(summaryResult);
+    } catch (err: any) {
+      console.error('Error in /api/ai/summarize-document:', err);
+      res.status(500).json({ error: 'Failed to generate document summary' });
     }
   });
 

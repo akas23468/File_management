@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -15,10 +15,98 @@ import { AuditTrail } from './components/AuditTrail';
 import { SettingsView } from './components/SettingsView';
 import { SourceViewerModal } from './components/SourceViewerModal';
 import { CompareVersionsModal } from './components/CompareVersionsModal';
+import { sounds } from './utils/soundEffects';
+import { getSupabase, isSupabaseConfigured } from './supabaseClient';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { isLoggedIn, activeView, currentUser, toastMessage, setToastMessage } = useApp();
+  const { isLoggedIn, activeView, setActiveView, logout, currentUser, toastMessage, setToastMessage } = useApp();
+  const [isVerifyingSession, setIsVerifyingSession] = useState<boolean>(true);
+
+  // Initialize Theme and Font Scale on initial mount
+  useEffect(() => {
+    try {
+      const root = document.documentElement;
+      const theme = localStorage.getItem('minemind_theme') || 'light';
+      root.classList.remove('dark', 'theme-amber', 'theme-contrast');
+      if (theme === 'dark') root.classList.add('dark');
+      if (theme === 'amber') root.classList.add('theme-amber');
+      if (theme === 'contrast') root.classList.add('theme-contrast');
+
+      const fontSize = localStorage.getItem('minemind_font_size') || 'standard';
+      root.classList.remove('font-large', 'font-xlarge');
+      if (fontSize === 'large') root.classList.add('font-large');
+      if (fontSize === 'xlarge') root.classList.add('font-xlarge');
+
+      const compact = localStorage.getItem('minemind_compact_mode') === 'true';
+      if (compact) root.classList.add('compact-ui');
+    } catch {}
+  }, []);
+
+  // Session Protection for authenticated pages
+  useEffect(() => {
+    let isMounted = true;
+
+    const enforceSessionProtection = async () => {
+      if (!isLoggedIn) {
+        if (isMounted) setIsVerifyingSession(false);
+        return;
+      }
+
+      // Check auth type: demo/intranet accounts do not require Supabase GoTrue tokens
+      const authType = localStorage.getItem('khanij_auth_type');
+      if (authType === 'local' || currentUser?.email?.includes('@cmpdi.co.in') || currentUser?.email?.includes('@secl.gov.in') || currentUser?.id?.startsWith('usr_')) {
+        if (isMounted) setIsVerifyingSession(false);
+        return;
+      }
+
+      if (!isSupabaseConfigured) {
+        if (isMounted) setIsVerifyingSession(false);
+        return;
+      }
+
+      const client = getSupabase();
+      if (!client) {
+        if (isMounted) setIsVerifyingSession(false);
+        return;
+      }
+
+      try {
+        const { data: { session }, error } = await client.auth.getSession();
+        if (error || !session) {
+          // If session expired for a Supabase-authenticated account, safely log out
+          if (authType === 'supabase') {
+            logout();
+          }
+        }
+      } catch (e) {
+        console.warn('[Session Guard] Verification error:', e);
+      } finally {
+        if (isMounted) {
+          setIsVerifyingSession(false);
+        }
+      }
+    };
+
+    enforceSessionProtection();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeView, isLoggedIn, currentUser, logout]);
+
+  // Play audio chime when toast alerts fire
+  useEffect(() => {
+    if (toastMessage) {
+      if (toastMessage.type === 'success') {
+        sounds.playSuccess();
+      } else if (toastMessage.type === 'warning') {
+        sounds.playAlert();
+      } else {
+        sounds.playDispatch();
+      }
+    }
+  }, [toastMessage]);
 
   if (!isLoggedIn || activeView === 'login') {
     return <LoginScreen />;

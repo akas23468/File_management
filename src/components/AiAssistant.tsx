@@ -305,6 +305,11 @@ export const AiAssistant: React.FC = () => {
     }
 
     try {
+      console.log('[AiAssistant] Dispatching query to backend /api/ai/ask (xAI Grok API endpoint)...', {
+        question: q,
+        subsidiary: selectedSubsidiary,
+      });
+
       // Call full-stack server endpoint /api/ai/ask
       const res = await fetch('/api/ai/ask', {
         method: 'POST',
@@ -321,6 +326,14 @@ export const AiAssistant: React.FC = () => {
       }
 
       const data = await res.json();
+      console.log('[AiAssistant] Received response from /api/ai/ask:', {
+        foundInKnowledgeBase: data.foundInKnowledgeBase,
+        provider: data.provider || 'xai-grok',
+        modelUsed: data.modelUsed,
+        confidence: data.confidence,
+        citationsCount: data.citations?.length || 0,
+      });
+
       setIsOfflineResult(false);
       setActiveResult(data);
       addQueryRecord({
@@ -418,10 +431,6 @@ export const AiAssistant: React.FC = () => {
       {/* Top Banner: Strict Grounding Directives */}
       <div className="bg-[#141C2B] text-white border border-[#1E293B] rounded-xl p-4 sm:p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-xs font-mono text-[#C8892E] font-bold uppercase tracking-wider mb-1">
-            <ShieldCheck className="w-4 h-4 text-[#4C7A52]" />
-            <span>SIH PS-26023 Source-Grounded Knowledge Engine</span>
-          </div>
           <h2 className="font-serif font-bold text-lg sm:text-xl text-white">
             Ask Governed CMPDI & CIL Records
           </h2>

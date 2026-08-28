@@ -200,10 +200,6 @@ export const ReportGenerator: React.FC = () => {
             <span>Archive ({reports.length})</span>
           </button>
         </div>
-
-        <span className="text-[11px] font-mono text-[#64748B] hidden md:block">
-          Traceable Parliamentary & Directorate Format
-        </span>
       </div>
 
       {activeTab === 'create' ? (
@@ -218,19 +214,21 @@ export const ReportGenerator: React.FC = () => {
                 { num: 4, label: 'Sources', short: '4. Docs' },
                 { num: 5, label: 'Synthesis', short: '5. Synth' },
               ].map(s => (
-                <div 
+                <button 
                   key={s.num}
-                  className={`p-1.5 sm:p-2 rounded-lg transition-all ${
+                  type="button"
+                  onClick={() => setCurrentStep(s.num)}
+                  className={`p-1.5 sm:p-2 rounded-lg transition-all cursor-pointer ${
                     currentStep === s.num 
                       ? 'bg-[#141C2B] text-[#C8892E] font-bold shadow-xs' 
                       : currentStep > s.num
-                        ? 'bg-[#F0FDF4] text-[#16A34A] font-semibold'
-                        : 'text-[#94A3B8] bg-[#FAF8F3]'
+                        ? 'bg-[#F0FDF4] hover:bg-[#DCFCE7] text-[#16A34A] font-semibold'
+                        : 'text-[#94A3B8] bg-[#FAF8F3] hover:bg-[#EFEBE2]'
                   }`}
                 >
                   <span className="hidden sm:inline">{s.num}. {s.label}</span>
                   <span className="sm:hidden">{s.short}</span>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -259,7 +257,7 @@ export const ReportGenerator: React.FC = () => {
                   Select Statutory Report Template
                 </h3>
                 <p className="text-xs text-[#64748B]">
-                  Pre-configured schemas compliant with Ministry of Coal and DGMS reporting standards.
+                  Click any template to select and proceed directly to period definition.
                 </p>
               </div>
 
@@ -267,37 +265,33 @@ export const ReportGenerator: React.FC = () => {
                 {TEMPLATES.map(tmpl => (
                   <div
                     key={tmpl.id}
-                    onClick={() => setSelectedTemplate(tmpl.id)}
+                    onClick={() => {
+                      setSelectedTemplate(tmpl.id);
+                      setCurrentStep(2);
+                    }}
                     className={`p-4 rounded-xl border cursor-pointer transition-all ${
                       selectedTemplate === tmpl.id
                         ? 'bg-[#FAF8F3] border-2 border-[#C8892E] shadow-xs'
-                        : 'border-[#E4E0D6] hover:border-[#C8892E] bg-white'
+                        : 'border-[#E4E0D6] hover:border-[#C8892E] hover:bg-[#FAF8F3] bg-white'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="font-serif font-bold text-sm text-[#141C2B]">{tmpl.title}</span>
-                      {selectedTemplate === tmpl.id && (
+                      {selectedTemplate === tmpl.id ? (
                         <CheckCircle2 className="w-4 h-4 text-[#C8892E]" />
+                      ) : (
+                        <ArrowRight className="w-4 h-4 text-[#94A3B8] opacity-0 group-hover:opacity-100" />
                       )}
                     </div>
                     <p className="text-xs text-[#64748B] leading-relaxed">
                       {tmpl.description}
                     </p>
-                    <div className="mt-3 pt-2 border-t border-[#EFEBE2] text-[10px] font-mono text-[#8F9BAE]">
-                      Auto-selects verified filings: {tmpl.suggestedDocs.join(', ')}
+                    <div className="mt-3 pt-2 border-t border-[#EFEBE2] text-[10px] font-mono text-[#8F9BAE] flex items-center justify-between">
+                      <span>Auto-filings: {tmpl.suggestedDocs.join(', ')}</span>
+                      <span className="text-[#C8892E] font-sans font-semibold text-[11px]">Select & Continue →</span>
                     </div>
                   </div>
                 ))}
-              </div>
-
-              <div className="flex justify-end pt-4">
-                <button
-                  onClick={() => setCurrentStep(2)}
-                  className="px-5 py-2.5 bg-[#141C2B] text-white text-xs font-bold rounded-lg hover:bg-[#1E293B] flex items-center gap-1.5"
-                >
-                  <span>Next: Define Period</span>
-                  <ChevronRight className="w-4 h-4 text-[#C8892E]" />
-                </button>
               </div>
             </div>
           )}
@@ -305,43 +299,70 @@ export const ReportGenerator: React.FC = () => {
           {/* Step 2: Period & Date Scope */}
           {currentStep === 2 && (
             <div className="bg-white border border-[#E4E0D6] rounded-xl p-6 shadow-xs space-y-4">
-              <div className="pb-3 border-b border-[#EFEBE2]">
-                <h3 className="font-serif font-bold text-lg text-[#141C2B]">
-                  Specify Statutory Period
-                </h3>
-                <p className="text-xs text-[#64748B]">
-                  Filter reports to specific financial quarters or annual review cycles.
-                </p>
-              </div>
-
-              <div className="max-w-md space-y-3">
-                <label className="block text-xs font-semibold text-[#141C2B]">Reporting Period / Financial Year</label>
-                <select
-                  value={reportPeriod}
-                  onChange={(e) => setReportPeriod(e.target.value)}
-                  className="w-full p-3 bg-[#FAF8F3] border border-[#E4E0D6] rounded-lg text-xs font-mono font-bold text-[#141C2B]"
-                >
-                  <option value="FY 2025-26 (Q3/Q4)">FY 2025-26 (Q3/Q4 Cumulative Review)</option>
-                  <option value="FY 2025-26 (Annual)">FY 2025-26 (Full Financial Year)</option>
-                  <option value="FY 2024-25 (Annual)">FY 2024-25 (Historical Baseline)</option>
-                  <option value="Monthly Returns: Jan-Feb 2026">Monthly Operational Returns (Jan-Feb 2026)</option>
-                </select>
-              </div>
-
-              <div className="flex justify-between pt-4 border-t border-[#EFEBE2]">
+              <div className="pb-3 border-b border-[#EFEBE2] flex items-center justify-between">
+                <div>
+                  <h3 className="font-serif font-bold text-lg text-[#141C2B]">
+                    Specify Statutory Period
+                  </h3>
+                  <p className="text-xs text-[#64748B]">
+                    Click a financial review cycle to select and continue.
+                  </p>
+                </div>
                 <button
                   onClick={() => setCurrentStep(1)}
-                  className="px-4 py-2 bg-[#EFEBE2] text-[#141C2B] text-xs font-semibold rounded-lg hover:bg-[#D4CEBF]"
+                  className="px-3 py-1.5 bg-[#FAF8F3] hover:bg-[#EFEBE2] text-[#141C2B] text-xs font-semibold rounded-lg border border-[#E4E0D6] transition-colors"
                 >
-                  Back
+                  ← Back to Templates
                 </button>
-                <button
-                  onClick={() => setCurrentStep(3)}
-                  className="px-5 py-2.5 bg-[#141C2B] text-white text-xs font-bold rounded-lg hover:bg-[#1E293B] flex items-center gap-1.5"
-                >
-                  <span>Next: Choose Subsidiary</span>
-                  <ChevronRight className="w-4 h-4 text-[#C8892E]" />
-                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {[
+                  {
+                    value: 'FY 2025-26 (Q3/Q4)',
+                    title: 'FY 2025-26 (Q3/Q4 Cumulative Review)',
+                    desc: 'Latest active quarter reconciliation and progressive fiscal targets',
+                  },
+                  {
+                    value: 'FY 2025-26 (Annual)',
+                    title: 'FY 2025-26 (Full Financial Year)',
+                    desc: 'Full twelve-month statutory operational extraction and dispatch review',
+                  },
+                  {
+                    value: 'FY 2024-25 (Annual)',
+                    title: 'FY 2024-25 (Historical Baseline)',
+                    desc: 'Prior financial year audit baseline for multi-year variance analysis',
+                  },
+                  {
+                    value: 'Monthly Returns: Jan-Feb 2026',
+                    title: 'Monthly Operational Returns (Jan-Feb 2026)',
+                    desc: 'High-frequency monthly production sheets and HEMM machine logs',
+                  },
+                ].map(p => (
+                  <div
+                    key={p.value}
+                    onClick={() => {
+                      setReportPeriod(p.value);
+                      setCurrentStep(3);
+                    }}
+                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                      reportPeriod === p.value
+                        ? 'bg-[#FAF8F3] border-2 border-[#C8892E] shadow-xs'
+                        : 'border-[#E4E0D6] hover:border-[#C8892E] hover:bg-[#FAF8F3] bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-serif font-bold text-sm text-[#141C2B]">{p.title}</span>
+                      {reportPeriod === p.value && (
+                        <CheckCircle2 className="w-4 h-4 text-[#C8892E]" />
+                      )}
+                    </div>
+                    <p className="text-xs text-[#64748B] mt-0.5">{p.desc}</p>
+                    <div className="mt-3 pt-2 border-t border-[#EFEBE2] flex justify-end">
+                      <span className="text-[#C8892E] font-sans font-semibold text-[11px]">Select Period →</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -349,13 +370,21 @@ export const ReportGenerator: React.FC = () => {
           {/* Step 3: Subsidiary Selector */}
           {currentStep === 3 && (
             <div className="bg-white border border-[#E4E0D6] rounded-xl p-6 shadow-xs space-y-4">
-              <div className="pb-3 border-b border-[#EFEBE2]">
-                <h3 className="font-serif font-bold text-lg text-[#141C2B]">
-                  Select Subsidiary Jurisdiction
-                </h3>
-                <p className="text-xs text-[#64748B]">
-                  Scope extraction to a specific subsidiary or generate consolidated Coal India Limited report.
-                </p>
+              <div className="pb-3 border-b border-[#EFEBE2] flex items-center justify-between">
+                <div>
+                  <h3 className="font-serif font-bold text-lg text-[#141C2B]">
+                    Select Subsidiary Jurisdiction
+                  </h3>
+                  <p className="text-xs text-[#64748B]">
+                    Click any subsidiary zone to proceed directly to verified sources.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setCurrentStep(2)}
+                  className="px-3 py-1.5 bg-[#FAF8F3] hover:bg-[#EFEBE2] text-[#141C2B] text-xs font-semibold rounded-lg border border-[#E4E0D6] transition-colors"
+                >
+                  ← Back to Period
+                </button>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -363,35 +392,25 @@ export const ReportGenerator: React.FC = () => {
                   <button
                     key={sub}
                     type="button"
-                    onClick={() => setReportSubsidiary(sub as Subsidiary | 'ALL')}
-                    className={`p-3.5 rounded-lg border text-xs font-mono font-bold transition-all text-left ${
+                    onClick={() => {
+                      setReportSubsidiary(sub as Subsidiary | 'ALL');
+                      setCurrentStep(4);
+                    }}
+                    className={`p-3.5 rounded-lg border text-xs font-mono font-bold transition-all text-left cursor-pointer ${
                       reportSubsidiary === sub
                         ? 'bg-[#141C2B] text-[#C8892E] border-[#141C2B] shadow-xs'
-                        : 'bg-[#FAF8F3] text-[#141C2B] border-[#E4E0D6] hover:border-[#C8892E]'
+                        : 'bg-[#FAF8F3] text-[#141C2B] border-[#E4E0D6] hover:border-[#C8892E] hover:bg-white'
                     }`}
                   >
-                    <div>{sub === 'ALL' ? 'All CIL Subsidiaries' : sub}</div>
+                    <div className="flex items-center justify-between">
+                      <span>{sub === 'ALL' ? 'All CIL Subsidiaries' : sub}</span>
+                      <span className="text-[#C8892E] text-[10px]">→</span>
+                    </div>
                     <span className="text-[10px] text-[#8F9BAE] block font-sans font-normal mt-0.5">
                       {sub === 'ALL' ? 'Pan-India Overview' : `${sub} Mining Operations`}
                     </span>
                   </button>
                 ))}
-              </div>
-
-              <div className="flex justify-between pt-4 border-t border-[#EFEBE2]">
-                <button
-                  onClick={() => setCurrentStep(2)}
-                  className="px-4 py-2 bg-[#EFEBE2] text-[#141C2B] text-xs font-semibold rounded-lg hover:bg-[#D4CEBF]"
-                >
-                  Back
-                </button>
-                <button
-                  onClick={() => setCurrentStep(4)}
-                  className="px-5 py-2.5 bg-[#141C2B] text-white text-xs font-bold rounded-lg hover:bg-[#1E293B] flex items-center gap-1.5"
-                >
-                  <span>Next: Select Approved Sources</span>
-                  <ChevronRight className="w-4 h-4 text-[#C8892E]" />
-                </button>
               </div>
             </div>
           )}
@@ -399,18 +418,28 @@ export const ReportGenerator: React.FC = () => {
           {/* Step 4: Approved Sources Checkbox List (Section 5.7 Spec) */}
           {currentStep === 4 && (
             <div className="bg-white border border-[#E4E0D6] rounded-xl p-6 shadow-xs space-y-4">
-              <div className="pb-3 border-b border-[#EFEBE2] flex items-center justify-between">
+              <div className="pb-3 border-b border-[#EFEBE2] flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="font-serif font-bold text-lg text-[#141C2B]">
                     Approved Document Knowledge Sources
                   </h3>
                   <p className="text-xs text-[#64748B]">
-                    Strictly select verified filings. The AI will cite these documents only.
+                    Click documents to toggle citations. The AI will strictly cite selected verified filings.
                   </p>
                 </div>
-                <span className="text-xs font-mono bg-[#EFEBE2] px-2 py-1 rounded text-[#141C2B] font-bold">
-                  {selectedDocIds.length} sources selected
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDocIds(documents.map(d => d.id))}
+                    className="text-[11px] font-mono text-[#C8892E] hover:underline"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-[#94A3B8]">|</span>
+                  <span className="text-xs font-mono bg-[#EFEBE2] px-2 py-1 rounded text-[#141C2B] font-bold">
+                    {selectedDocIds.length} selected
+                  </span>
+                </div>
               </div>
 
               <div className="space-y-2.5 max-h-80 overflow-y-auto">
@@ -458,17 +487,17 @@ export const ReportGenerator: React.FC = () => {
                 })}
               </div>
 
-              <div className="flex justify-between pt-4 border-t border-[#EFEBE2]">
+              <div className="flex justify-between items-center pt-4 border-t border-[#EFEBE2]">
                 <button
                   onClick={() => setCurrentStep(3)}
-                  className="px-4 py-2 bg-[#EFEBE2] text-[#141C2B] text-xs font-semibold rounded-lg hover:bg-[#D4CEBF]"
+                  className="px-4 py-2 bg-[#EFEBE2] text-[#141C2B] text-xs font-semibold rounded-lg hover:bg-[#D4CEBF] cursor-pointer"
                 >
-                  Back
+                  ← Back to Subsidiary
                 </button>
                 <button
                   disabled={selectedDocIds.length === 0}
                   onClick={handleStartGeneration}
-                  className="px-6 py-2.5 bg-[#141C2B] disabled:opacity-50 text-white text-xs font-bold rounded-lg hover:bg-[#1E293B] flex items-center gap-2 shadow-xs"
+                  className="px-6 py-2.5 bg-[#141C2B] disabled:opacity-50 text-white text-xs font-bold rounded-lg hover:bg-[#1E293B] flex items-center gap-2 shadow-xs cursor-pointer"
                 >
                   <Sparkles className="w-4 h-4 text-[#C8892E]" />
                   <span>Synthesize Grounded Report</span>

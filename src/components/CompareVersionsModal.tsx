@@ -24,34 +24,36 @@ export const CompareVersionsModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-2 sm:p-4 backdrop-blur-xs">
       <div className="bg-white rounded-xl max-w-5xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-[#E4E0D6] overflow-hidden">
         {/* Modal Header */}
-        <div className="p-5 bg-[#141C2B] text-white flex items-center justify-between border-b border-[#1E293B]">
-          <div>
-            <div className="flex items-center gap-2 text-xs font-mono text-[#C8892E]">
-              <GitCompare className="w-4 h-4 text-[#C8892E]" />
-              <span>Controlled Revision Diff Inspector</span>
-              <span>·</span>
-              <span>{doc.documentCode}</span>
+        <div className="p-4 sm:p-5 bg-[#141C2B] text-white border-b border-[#1E293B]">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1 min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-[#C8892E]">
+                <GitCompare className="w-4 h-4 text-[#C8892E]" />
+                <span className="font-bold">Controlled Revision Diff Inspector</span>
+                <span>·</span>
+                <span>{doc.documentCode}</span>
+              </div>
+              <h3 className="font-serif font-bold text-base sm:text-lg text-white mt-0.5 break-words">
+                Comparing Version {v1.versionNumber}.0 vs Version {v2.versionNumber}.0 — {doc.title}
+              </h3>
             </div>
-            <h3 className="font-serif font-bold text-lg text-white mt-0.5">
-              Comparing Version {v1.versionNumber}.0 vs Version {v2.versionNumber}.0 — {doc.title}
-            </h3>
+            <button
+              onClick={() => setCompareVersions(null)}
+              className="text-[#94A3B8] hover:text-white p-1.5 rounded-lg hover:bg-[#1E293B] transition-colors cursor-pointer flex-shrink-0"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
-          <button
-            onClick={() => setCompareVersions(null)}
-            className="text-[#94A3B8] hover:text-white p-1 rounded"
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 overflow-y-auto space-y-6 bg-[#F7F5F0] flex-1 text-xs">
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-5 bg-[#F7F5F0] flex-1 text-xs">
           {/* Submission Context & AI Flag */}
           <div className="bg-white p-4 rounded-xl border border-[#E4E0D6] space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
               <span className="font-bold text-[#141C2B] text-xs">
                 Revision Target: Version {v2.versionNumber}.0 ({v2.approvalPriority?.toUpperCase() || 'NORMAL'} PRIORITY)
               </span>
@@ -63,8 +65,8 @@ export const CompareVersionsModal: React.FC = () => {
               <strong>Reason for Update:</strong> {v2.reasonForChange}
             </p>
             {v2.aiRiskReason && (
-              <div className="p-2 bg-[#FEF2F2] border border-[#FECACA] rounded text-xs text-[#991B1B] flex items-center gap-2">
-                <AlertTriangle className="w-3.5 h-3.5 text-[#DC2626] flex-shrink-0" />
+              <div className="p-2.5 bg-[#FEF2F2] border border-[#FECACA] rounded-lg text-xs text-[#991B1B] flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-[#DC2626] flex-shrink-0" />
                 <span>{v2.aiRiskReason}</span>
               </div>
             )}
@@ -76,11 +78,11 @@ export const CompareVersionsModal: React.FC = () => {
               <h4 className="font-serif font-bold text-xs text-[#141C2B]">
                 Parameter & Assay Variances
               </h4>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 font-mono">
                 {v2.keyMetrics.map((km, idx) => (
                   <div key={idx} className="p-3 bg-[#FAF8F3] rounded-lg border border-[#E4E0D6]">
                     <span className="text-[10px] text-[#64748B] block">{km.label}</span>
-                    <span className="font-bold text-sm text-[#141C2B]">{km.value}</span>
+                    <span className="font-bold text-sm text-[#141C2B] mt-0.5 block">{km.value}</span>
                     {km.variance && (
                       <span className="text-[10px] text-[#C8892E] font-bold block mt-1">
                         Δ {km.variance} vs v{v1.versionNumber}
@@ -95,7 +97,7 @@ export const CompareVersionsModal: React.FC = () => {
           {/* Side-by-Side Text Comparison */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Version N-1 (Baseline) */}
-            <div className="bg-white p-5 rounded-xl border border-[#E4E0D6] space-y-3">
+            <div className="bg-white p-4 sm:p-5 rounded-xl border border-[#E4E0D6] space-y-3">
               <div className="flex items-center justify-between pb-2 border-b border-[#EFEBE2]">
                 <div className="font-mono font-bold text-xs text-[#64748B]">
                   BASELINE VERSION {v1.versionNumber}.0
@@ -105,7 +107,7 @@ export const CompareVersionsModal: React.FC = () => {
                 </span>
               </div>
 
-              <div className="p-3 bg-[#FAF8F3] rounded-lg font-mono text-[11px] text-[#475569] leading-relaxed max-h-64 overflow-y-auto">
+              <div className="p-3 bg-[#FAF8F3] rounded-lg font-mono text-[11px] text-[#475569] leading-relaxed max-h-64 overflow-y-auto border border-[#EFEBE2]">
                 {v1.extractedText}
               </div>
 
@@ -115,7 +117,7 @@ export const CompareVersionsModal: React.FC = () => {
             </div>
 
             {/* Version N (Proposed Revision) */}
-            <div className="bg-white p-5 rounded-xl border-2 border-[#C8892E] space-y-3">
+            <div className="bg-white p-4 sm:p-5 rounded-xl border-2 border-[#C8892E] space-y-3">
               <div className="flex items-center justify-between pb-2 border-b border-[#EFEBE2]">
                 <div className="font-mono font-bold text-xs text-[#C8892E]">
                   PROPOSED REVISION VERSION {v2.versionNumber}.0
@@ -138,15 +140,15 @@ export const CompareVersionsModal: React.FC = () => {
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 bg-white border-t border-[#E4E0D6] flex items-center justify-between">
+        <div className="p-4 bg-white border-t border-[#E4E0D6] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <span className="text-[11px] font-mono text-[#64748B]">
             Approving replaces active vector index with Version {v2.versionNumber}.0
           </span>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <button
               onClick={() => setCompareVersions(null)}
-              className="px-4 py-2 bg-[#EFEBE2] text-[#141C2B] text-xs font-semibold rounded-lg hover:bg-[#D4CEBF]"
+              className="px-4 py-2.5 bg-[#EFEBE2] text-[#141C2B] text-xs font-semibold rounded-lg hover:bg-[#D4CEBF] cursor-pointer text-center"
             >
               Close Diff
             </button>
@@ -154,7 +156,7 @@ export const CompareVersionsModal: React.FC = () => {
             {currentUser.role === 'admin' && v2.approvalStatus === 'pending' && (
               <button
                 onClick={handleQuickApprove}
-                className="px-5 py-2 bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-xs"
+                className="px-5 py-2.5 bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>Approve & Re-Index v{v2.versionNumber}.0</span>

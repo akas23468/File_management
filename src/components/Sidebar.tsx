@@ -9,14 +9,8 @@ import {
   CheckSquare, 
   TrendingUp, 
   ShieldAlert, 
-  ShieldCheck,
   Settings, 
   LogOut, 
-  Layers, 
-  Building2, 
-  UserCheck,
-  ChevronRight,
-  Database,
   X
 } from 'lucide-react';
 
@@ -26,7 +20,6 @@ export const Sidebar: React.FC = () => {
     activeView, 
     setActiveView, 
     logout, 
-    switchRole,
     documents,
     isMobileNavOpen,
     setIsMobileNavOpen
@@ -102,13 +95,7 @@ export const Sidebar: React.FC = () => {
             <div>
               <div className="flex items-center gap-1.5">
                 <h1 className="font-serif font-bold text-base sm:text-lg tracking-tight text-white">MINEMIND <span className="text-[#C8892E]">AI</span></h1>
-                <span className="text-[9px] px-1 py-0.2 rounded bg-[#C8892E]/20 text-[#C8892E] font-mono font-semibold uppercase tracking-wider border border-[#C8892E]/30">
-                  v2.4
-                </span>
               </div>
-              <p className="text-[10px] text-[#8F9BAE] leading-tight mt-0.5 max-w-[150px] line-clamp-1" title="From scattered reports to smarter mining decision">
-                From scattered reports to smarter mining decision
-              </p>
             </div>
           </div>
 
@@ -121,41 +108,6 @@ export const Sidebar: React.FC = () => {
             title="Close navigation"
           >
             <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Official Portal Connection & Authority Switcher */}
-        <div className="px-3.5 py-3 bg-[#0F1726] border-b border-[#1E293B] flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${currentUser.role === 'admin' ? 'bg-[#C8892E] ring-2 ring-[#C8892E]/30 animate-pulse' : 'bg-[#10B981] ring-2 ring-[#10B981]/30'}`} />
-              <span className="text-[11px] font-mono font-bold tracking-wider uppercase text-[#CBD5E1]">
-                {currentUser.role === 'admin' ? 'Admin Portal' : 'Employee Portal'}
-              </span>
-            </div>
-            <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-[#1E293B] text-[#94A3B8] border border-[#334155]">
-              {currentUser.subsidiary}
-            </span>
-          </div>
-
-          <button
-            id="btn-switch-role-toggle"
-            onClick={() => {
-              switchRole(currentUser.role === 'admin' ? 'employee' : 'admin');
-              setIsMobileNavOpen(false);
-            }}
-            className="w-full text-xs px-3 py-1.5 rounded-md bg-[#1B2538] hover:bg-[#C8892E] hover:text-[#141C2B] transition-all text-[#CBD5E1] font-semibold flex items-center justify-between border border-[#334155] shadow-2xs group cursor-pointer"
-            title={currentUser.role === 'admin' ? 'Switch to Field & Planning Officer Workstation' : 'Switch to Chief Mining Engineer Governance Portal'}
-          >
-            <div className="flex items-center gap-2 truncate">
-              {currentUser.role === 'admin' ? (
-                <Building2 className="w-3.5 h-3.5 text-[#C8892E] group-hover:text-[#141C2B] transition-colors flex-shrink-0" />
-              ) : (
-                <ShieldCheck className="w-3.5 h-3.5 text-[#10B981] group-hover:text-[#141C2B] transition-colors flex-shrink-0" />
-              )}
-              <span className="truncate">Switch to {currentUser.role === 'admin' ? 'Employee' : 'Admin'}</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 text-[#64748B] group-hover:text-[#141C2B] group-hover:translate-x-0.5 transition-all flex-shrink-0" />
           </button>
         </div>
 
@@ -204,43 +156,7 @@ export const Sidebar: React.FC = () => {
               </button>
             );
           })}
-
-          {/* Visibility of Admin Restrictions for Employees */}
-          {currentUser.role === 'employee' && (
-            <div className="pt-4 mt-4 border-t border-[#1E293B]/70 px-3">
-              <div className="text-[10px] font-mono uppercase tracking-widest text-[#475569] mb-2">
-                Admin Protected Modules
-              </div>
-              <div className="space-y-1 opacity-50 cursor-not-allowed">
-                <div className="flex items-center justify-between px-3 py-1.5 rounded text-xs text-[#64748B]">
-                  <div className="flex items-center gap-2.5">
-                    <CheckSquare className="w-3.5 h-3.5" />
-                    <span>Approval Queue</span>
-                  </div>
-                  <span className="text-[10px] font-mono bg-[#1E293B] px-1 rounded text-[#94A3B8]">Admin Only</span>
-                </div>
-                <div className="flex items-center justify-between px-3 py-1.5 rounded text-xs text-[#64748B]">
-                  <div className="flex items-center gap-2.5">
-                    <ShieldAlert className="w-3.5 h-3.5" />
-                    <span>Audit Trail</span>
-                  </div>
-                  <span className="text-[10px] font-mono bg-[#1E293B] px-1 rounded text-[#94A3B8]">Admin Only</span>
-                </div>
-              </div>
-            </div>
-          )}
         </nav>
-
-        {/* Grounding System Badge */}
-        <div className="p-3 mx-3 mb-3 rounded-lg bg-[#0E1522] border border-[#1E293B] text-xs">
-          <div className="flex items-center gap-1.5 text-[#4C7A52] font-semibold text-[11px]">
-            <Database className="w-3.5 h-3.5" />
-            <span>Grounded RAG Pipeline</span>
-          </div>
-          <p className="text-[10px] text-[#8F9BAE] mt-1 leading-relaxed">
-            Answers generated strictly from approved CMPDI/CIL source records.
-          </p>
-        </div>
 
         {/* User Footer Card */}
         <div className="p-3 border-t border-[#1E293B] bg-[#0E1522]">

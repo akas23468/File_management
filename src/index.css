@@ -5,13 +5,141 @@
     --font-display: 'Fraunces', Georgia, serif;
     --font-sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     --font-mono: 'IBM Plex Mono', Menlo, Monaco, Consolas, monospace;
+    --bg-canvas: #F7F5F0;
+    --text-primary: #141C2B;
+    --surface-card: #FFFFFF;
+    --border-color: #E4E0D6;
+  }
+
+  html.dark {
+    --bg-canvas: #0B111E;
+    --text-primary: #F1F5F9;
+    --surface-card: #141C2B;
+    --border-color: #243147;
+    color-scheme: dark;
+  }
+
+  html.theme-amber {
+    --bg-canvas: #120E0A;
+    --text-primary: #FDE68A;
+    --surface-card: #1E1711;
+    --border-color: #452E17;
+    color-scheme: dark;
+  }
+
+  html.theme-contrast {
+    --bg-canvas: #000000;
+    --text-primary: #FFFFFF;
+    --surface-card: #0F0F0F;
+    --border-color: #F59E0B;
+    color-scheme: dark;
+  }
+
+  html.font-large {
+    font-size: 17px;
+  }
+
+  html.font-xlarge {
+    font-size: 18.5px;
   }
 
   body {
     font-family: var(--font-sans);
-    background-color: #F7F5F0;
-    color: #141C2B;
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
+}
+
+/* Dark mode specific container overrides */
+html.dark #minemind-root-layout,
+html.dark main {
+  background-color: #0B111E !important;
+}
+
+html.dark .bg-white {
+  background-color: #141C2B !important;
+  color: #F1F5F9 !important;
+}
+
+html.dark .bg-\[\#FAF8F3\] {
+  background-color: #192336 !important;
+  color: #F1F5F9 !important;
+}
+
+html.dark .border-\[\#E4E0D6\],
+html.dark .border-\[\#EFEBE2\] {
+  border-color: #26354D !important;
+}
+
+html.dark .text-\[\#141C2B\] {
+  color: #F1F5F9 !important;
+}
+
+html.dark .text-\[\#64748B\] {
+  color: #94A3B8 !important;
+}
+
+/* Amber OLED Mode */
+html.theme-amber #minemind-root-layout,
+html.theme-amber main {
+  background-color: #100C08 !important;
+}
+
+html.theme-amber .bg-white {
+  background-color: #1D150E !important;
+  color: #FDE68A !important;
+}
+
+html.theme-amber .bg-\[\#FAF8F3\] {
+  background-color: #271D14 !important;
+  color: #FDE68A !important;
+}
+
+html.theme-amber .border-\[\#E4E0D6\],
+html.theme-amber .border-\[\#EFEBE2\] {
+  border-color: #523719 !important;
+}
+
+html.theme-amber .text-\[\#141C2B\] {
+  color: #FEF3C7 !important;
+}
+
+/* High Contrast DGMS Safety Mode */
+html.theme-contrast #minemind-root-layout,
+html.theme-contrast main {
+  background-color: #000000 !important;
+}
+
+html.theme-contrast .bg-white {
+  background-color: #080808 !important;
+  color: #FFFFFF !important;
+  border-color: #F59E0B !important;
+}
+
+html.theme-contrast .bg-\[\#FAF8F3\] {
+  background-color: #141414 !important;
+  color: #FFFFFF !important;
+}
+
+html.theme-contrast .border-\[\#E4E0D6\],
+html.theme-contrast .border-\[\#EFEBE2\] {
+  border-color: #F59E0B !important;
+}
+
+html.theme-contrast .text-\[\#141C2B\] {
+  color: #FFFFFF !important;
+}
+
+/* Compact UI Density */
+html.compact-ui .p-6 {
+  padding: 1rem !important;
+}
+html.compact-ui .p-4 {
+  padding: 0.75rem !important;
+}
+html.compact-ui .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.75rem !important;
 }
 
 .font-serif, .font-display {

@@ -117,9 +117,6 @@ export const Header: React.FC = () => {
         <div className="min-w-0">
           <h1 className="font-serif font-bold text-base sm:text-lg md:text-xl text-[#141C2B] tracking-tight truncate flex items-center gap-2">
             <span className="truncate">{currentViewMeta.title}</span>
-            <span className="hidden sm:inline-flex text-[11px] font-mono font-normal text-[#64748B] bg-[#F7F5F0] px-1.5 py-0.5 rounded border border-[#E4E0D6] flex-shrink-0">
-              PS-26023
-            </span>
             {isUndergroundModeActive && (
               <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] px-1.5 py-0.5 rounded-full flex-shrink-0 animate-pulse">
                 <WifiOff className="w-2.5 h-2.5 text-[#D97706]" />
@@ -128,14 +125,6 @@ export const Header: React.FC = () => {
               </span>
             )}
           </h1>
-          <p className="text-[11px] sm:text-xs text-[#64748B] truncate mt-0.5 hidden sm:flex items-center gap-2">
-            <span className="truncate">{currentViewMeta.subtitle}</span>
-            {isUndergroundModeActive && (
-              <span className="text-[11px] text-[#D97706] font-medium flex-shrink-0">
-                • Local SW Cache ({cachedDocsCount} docs)
-              </span>
-            )}
-          </p>
         </div>
       </div>
 
@@ -224,15 +213,6 @@ export const Header: React.FC = () => {
             <span className="w-1 h-1 rounded-full bg-[#16A34A] mx-0.5" />
             <span className="font-semibold text-[#15803D]">Zero Hallucination</span>
           </div>
-        </div>
-
-        {/* Role Pill */}
-        <div className={`hidden sm:inline-flex px-2 sm:px-2.5 py-1 rounded-md text-[11px] sm:text-xs font-mono font-bold border ${
-          currentUser.role === 'admin' 
-            ? 'bg-[#141C2B] text-[#C8892E] border-[#141C2B]' 
-            : 'bg-[#EFEBE2] text-[#141C2B] border-[#D4CEBF]'
-        }`}>
-          {currentUser.role === 'admin' ? 'ADMIN' : 'OFFICER'}
         </div>
       </div>
     </header>

@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { getStorageSignedUrl } from '../services/supabaseDataService';
 import { 
   Clock, 
   CheckCircle2, 
@@ -10,7 +11,8 @@ import {
   Layers, 
   MessageSquare,
   Sparkles,
-  Plus
+  Plus,
+  ExternalLink
 } from 'lucide-react';
 
 export const MyUpdates: React.FC = () => {
@@ -21,6 +23,23 @@ export const MyUpdates: React.FC = () => {
     setActiveDocForDetail, 
     setCompareVersions 
   } = useApp();
+
+  const [loadingSignedUrlPath, setLoadingSignedUrlPath] = useState<string | null>(null);
+
+  const handleOpenStorageFile = async (filePath?: string) => {
+    if (!filePath) return;
+    setLoadingSignedUrlPath(filePath);
+    try {
+      const signedUrl = await getStorageSignedUrl(filePath, 3600);
+      if (signedUrl) {
+        window.open(signedUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err) {
+      console.error('Error opening signed URL:', err);
+    } finally {
+      setLoadingSignedUrlPath(null);
+    }
+  };
 
   // Extract all versions submitted by this employee / subsidiary
   const submissions: { doc: any; version: any }[] = [];
@@ -126,7 +145,20 @@ export const MyUpdates: React.FC = () => {
 
                   <div>
                     <h4 className="font-serif font-bold text-base text-[#141C2B]">{doc.title}</h4>
-                    <p className="text-xs text-[#64748B] mt-0.5">{version.fileName} ({version.fileSize || '12.4 MB'})</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <p className="text-xs text-[#64748B]">{version.fileName} ({version.fileSize || '12.4 MB'})</p>
+                      {version.storageFilePath && (
+                        <button
+                          onClick={() => handleOpenStorageFile(version.storageFilePath)}
+                          disabled={loadingSignedUrlPath === version.storageFilePath}
+                          className="px-2 py-0.5 bg-[#EFEBE2] hover:bg-[#141C2B] hover:text-white text-[#141C2B] rounded text-[10px] font-mono font-bold inline-flex items-center gap-1 transition-colors cursor-pointer"
+                          title="Generate signed URL to open storage object"
+                        >
+                          <ExternalLink className="w-2.5 h-2.5 text-[#C8892E]" />
+                          <span>{loadingSignedUrlPath === version.storageFilePath ? 'Signing...' : 'View Storage File'}</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Submission Context */}

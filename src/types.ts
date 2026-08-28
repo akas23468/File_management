@@ -74,6 +74,8 @@ export interface DocumentVersion {
   documentId: string;
   versionNumber: number; // e.g. 1, 2, 3
   fileUrl?: string;
+  storageFilePath?: string;
+  storageBucket?: string;
   fileName: string;
   fileSize: string;
   reasonForChange: string;

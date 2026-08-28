@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Document, DocumentVersion, Subsidiary, ApprovalPriority, UserAccessRequest } from '../types';
+import { getStorageSignedUrl } from '../services/supabaseDataService';
 import { 
   CheckSquare, 
   GitCompare, 
@@ -20,7 +21,9 @@ import {
   UserCheck,
   UserX,
   IdCard,
-  Mail
+  Mail,
+  ExternalLink,
+  FileText
 } from 'lucide-react';
 
 export const ApprovalQueue: React.FC = () => {
@@ -48,6 +51,22 @@ export const ApprovalQueue: React.FC = () => {
   // Reject access request modal state
   const [rejectingRequestId, setRejectingRequestId] = useState<string | null>(null);
   const [rejectReasonInput, setRejectReasonInput] = useState<string>('');
+  const [loadingSignedUrlPath, setLoadingSignedUrlPath] = useState<string | null>(null);
+
+  const handleOpenStorageFile = async (filePath?: string, fileName?: string) => {
+    if (!filePath) return;
+    setLoadingSignedUrlPath(filePath);
+    try {
+      const signedUrl = await getStorageSignedUrl(filePath, 3600);
+      if (signedUrl) {
+        window.open(signedUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err) {
+      console.error('Failed to get signed URL:', err);
+    } finally {
+      setLoadingSignedUrlPath(null);
+    }
+  };
 
   // Collect pending approvals
   const pendingItems: { doc: Document; version: DocumentVersion }[] = [];
@@ -158,7 +177,7 @@ export const ApprovalQueue: React.FC = () => {
           }`}
         >
           <Users className="w-4 h-4" />
-          <span>User Access Requests (SIH Onboarding)</span>
+          <span>User Access Requests</span>
           <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${
             pendingAccessRequestsCount > 0 ? 'bg-[#D97706] text-white font-bold animate-pulse' : 'bg-[#E2E8F0] text-[#64748B]'
           }`}>
@@ -213,10 +232,6 @@ export const ApprovalQueue: React.FC = () => {
           >
             Routine ({routineCount})
           </button>
-        </div>
-
-        <div className="text-[11px] font-mono text-[#64748B]">
-          Grounded Rule: Unapproved versions are never exposed to AI queries
         </div>
       </div>
 
@@ -287,7 +302,20 @@ export const ApprovalQueue: React.FC = () => {
                       <div className="text-xs text-[#475569] flex flex-wrap items-center gap-4">
                         <span>Submitted by: <strong>{version.uploadedBy.name}</strong> ({version.uploadedBy.employeeId})</span>
                         <span>Date: <strong>{new Date(version.uploadedAt).toLocaleDateString()}</strong></span>
-                        <span>File: <strong>{version.fileName}</strong> ({version.fileSize || '14.2 MB'})</span>
+                        <span className="flex items-center gap-1">
+                          File: <strong>{version.fileName}</strong> ({version.fileSize || '14.2 MB'})
+                          {version.storageFilePath && (
+                            <button
+                              onClick={() => handleOpenStorageFile(version.storageFilePath, version.fileName)}
+                              disabled={loadingSignedUrlPath === version.storageFilePath}
+                              className="ml-1.5 px-2 py-0.5 bg-[#EFEBE2] hover:bg-[#141C2B] hover:text-white text-[#141C2B] rounded text-[10px] font-mono font-bold inline-flex items-center gap-1 transition-colors cursor-pointer"
+                              title="Open private storage object via Supabase Storage Signed URL"
+                            >
+                              <ExternalLink className="w-2.5 h-2.5 text-[#C8892E]" />
+                              <span>{loadingSignedUrlPath === version.storageFilePath ? 'Signing...' : 'View Storage File'}</span>
+                            </button>
+                          )}
+                        </span>
                       </div>
 
                       {/* Reason for change */}

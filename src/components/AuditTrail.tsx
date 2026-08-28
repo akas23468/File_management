@@ -93,18 +93,10 @@ export const AuditTrail: React.FC = () => {
         <div className="flex items-center gap-2.5 flex-shrink-0">
           <button
             onClick={exportCSV}
-            className="px-3.5 py-2 bg-[#243147] hover:bg-[#334155] text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors border border-[#334155]"
+            className="px-3.5 py-2 bg-[#FAF8F3] hover:bg-[#EFEBE2] text-[#141C2B] rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border border-[#E4E0D6]"
           >
             <Download className="w-3.5 h-3.5 text-[#C8892E]" />
             <span>Export CSV</span>
-          </button>
-
-          <button
-            onClick={exportJSON}
-            className="px-3.5 py-2 bg-[#FAF8F3] hover:bg-[#EFEBE2] text-[#141C2B] rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border border-[#E4E0D6]"
-          >
-            <FileText className="w-3.5 h-3.5 text-[#C8892E]" />
-            <span>Export JSON</span>
           </button>
         </div>
       </div>

@@ -397,7 +397,7 @@ export const MineMindHeroBanner: React.FC = () => {
           <Shield className="w-3.5 h-3.5 text-[#F59E0B]" />
           Secure Organizational Access
         </span>
-        <span className="font-mono text-[#64748B]">SIH PS 26023</span>
+        <span className="font-mono text-[#64748B]">Enterprise Edition</span>
       </div>
     </div>
   );
