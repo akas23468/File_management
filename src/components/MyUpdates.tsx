@@ -41,11 +41,20 @@ export const MyUpdates: React.FC = () => {
     }
   };
 
-  // Extract all versions submitted by this employee / subsidiary
+  // Extract all versions submitted by this employee / subsidiary (or all if admin)
   const submissions: { doc: any; version: any }[] = [];
-  documents.forEach(doc => {
+  (documents || []).forEach(doc => {
+    if (!doc || !Array.isArray(doc.versions)) return;
     doc.versions.forEach(v => {
-      if (v.uploadedBy.id === currentUser.id || v.uploadedBy.subsidiary === currentUser.subsidiary) {
+      if (!v || !v.uploadedBy) return;
+      const isMySub = 
+        currentUser.role === 'admin' ||
+        v.uploadedBy.id === currentUser.id ||
+        (v.uploadedBy.employeeId && currentUser.employeeId && v.uploadedBy.employeeId === currentUser.employeeId) ||
+        (v.uploadedBy.name && currentUser.name && v.uploadedBy.name.toLowerCase() === currentUser.name.toLowerCase()) ||
+        v.uploadedBy.subsidiary === currentUser.subsidiary;
+
+      if (isMySub) {
         submissions.push({ doc, version: v });
       }
     });

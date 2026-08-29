@@ -169,7 +169,6 @@ export const Sidebar: React.FC = () => {
               </div>
               <div className="truncate">
                 <p className="text-xs font-semibold text-white truncate">{currentUser.name}</p>
-                <p className="text-[10px] text-[#8F9BAE] font-mono truncate">{currentUser.employeeId}</p>
               </div>
             </div>
             <button

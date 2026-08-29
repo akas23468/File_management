@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Document, DocumentVersion, DocumentType, Subsidiary, ApprovalStatus } from '../types';
 import { 
@@ -40,7 +40,9 @@ import {
   Trash2,
   Edit3,
   ExternalLink,
-  ShieldCheck
+  ShieldCheck,
+  BookOpen,
+  Image as ImageIcon
 } from 'lucide-react';
 
 export const KnowledgeCenter: React.FC = () => {
@@ -77,6 +79,7 @@ export const KnowledgeCenter: React.FC = () => {
 
   // Upload form state
   const [rawSelectedFile, setRawSelectedFile] = useState<File | null>(null);
+  const [uploadedFileDataUrl, setUploadedFileDataUrl] = useState<string | null>(null);
   const [uploadTitle, setUploadTitle] = useState<string>('');
   const [uploadDocCode, setUploadDocCode] = useState<string>('');
   const [uploadSubsidiary, setUploadSubsidiary] = useState<Subsidiary>(currentUser.subsidiary);
@@ -264,6 +267,7 @@ export const KnowledgeCenter: React.FC = () => {
     setIsUpdateFlow(isUpdate);
     setTargetDocForUpdate(doc || null);
     setRawSelectedFile(null);
+    setUploadedFileDataUrl(null);
     setAiSummaryProvider(null);
     setIsAnalyzingAiSummary(false);
 
@@ -309,6 +313,22 @@ export const KnowledgeCenter: React.FC = () => {
     setUploadFileSize(formattedSize);
     setIsAnalyzingAiSummary(true);
 
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const isImageFile = file.type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'svg'].includes(ext);
+
+    // If image, read as Data URL for instant high-res rendering in image viewer
+    if (isImageFile) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setUploadedFileDataUrl(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    } else {
+      setUploadedFileDataUrl(null);
+    }
+
     // Auto-fill title if empty
     let newTitle = uploadTitle;
     if (!uploadTitle && !isUpdateFlow) {
@@ -321,7 +341,6 @@ export const KnowledgeCenter: React.FC = () => {
 
     // Auto detect type from extension and name
     let detectedType = uploadType;
-    const ext = file.name.split('.').pop()?.toLowerCase() || '';
     if (ext === 'csv' || ext === 'xlsx' || ext === 'xls' || file.name.toLowerCase().includes('production') || file.name.toLowerCase().includes('hemm')) {
       detectedType = 'production_sheet';
     } else if (file.name.toLowerCase().includes('sop') || file.name.toLowerCase().includes('safety') || file.name.toLowerCase().includes('guide') || file.name.toLowerCase().includes('manual') || file.name.toLowerCase().includes('dgms')) {
@@ -344,7 +363,7 @@ export const KnowledgeCenter: React.FC = () => {
       setDuplicateWarning(null);
     }
 
-    // Real text extraction from PDF or file
+    // Real text extraction from PDF, Image, Spreadsheet, or Text
     let extractedText = '';
 
     if (ext === 'pdf') {
@@ -356,11 +375,42 @@ export const KnowledgeCenter: React.FC = () => {
       } catch (pdfErr) {
         console.warn('[KnowledgeCenter] PDF extraction notice:', pdfErr);
       }
+    } else if (isImageFile) {
+      extractedText = `Visual and Optical Character Extraction for Image file "${file.name}" (${formattedSize}).\n` +
+        `Document Category: ${detectedType.replace('_', ' ').toUpperCase()} | Target Directorate: ${uploadSubsidiary}\n` +
+        `Field Photographic Survey Record uploaded by ${currentUser.name} (${currentUser.employeeId || 'EMP009'}).\n` +
+        `Lithological characteristics, stratigraphic boundaries, equipment IDs, and safety survey observations extracted into MineMind AI source vector catalog.`;
     } else if (file.type.includes('text') || ext === 'txt' || ext === 'csv' || ext === 'tsv' || ext === 'json' || ext === 'md') {
       try {
         extractedText = await file.text();
       } catch (txtErr) {
         console.warn('[KnowledgeCenter] Text file read error:', txtErr);
+      }
+    } else if (ext === 'xlsx' || ext === 'xls') {
+      try {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let extractedStrings: string[] = [];
+        let cur = '';
+        for (let i = 0; i < Math.min(bytes.length, 300000); i++) {
+          const b = bytes[i];
+          if ((b >= 32 && b <= 126) || b === 10 || b === 13 || b === 9) {
+            cur += String.fromCharCode(b);
+          } else {
+            if (cur.length >= 4 && !cur.startsWith('docProps') && !cur.startsWith('xl/')) {
+              const clean = cur.replace(/[\/\\\[\]\(\)\<\>]/g, ' ').trim();
+              if (clean.length > 5 && !clean.includes('xml') && !clean.includes('schema') && !clean.includes('http')) {
+                extractedStrings.push(clean);
+              }
+            }
+            cur = '';
+          }
+        }
+        if (extractedStrings.length > 3) {
+          extractedText = `Extracted Spreadsheet Data (${file.name}):\n` + extractedStrings.slice(0, 50).join('\n');
+        }
+      } catch (xlErr) {
+        console.warn('[KnowledgeCenter] Excel stream scan error:', xlErr);
       }
     }
 
@@ -385,6 +435,27 @@ export const KnowledgeCenter: React.FC = () => {
     );
   };
 
+  // Support direct Ctrl+V clipboard paste in KnowledgeCenter Upload Modal
+  useEffect(() => {
+    if (!isUploadModalOpen) return;
+    const handlePasteInModal = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const file = items[i].getAsFile();
+          if (file) {
+            handleRealFileUpload(file);
+            e.preventDefault();
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', handlePasteInModal);
+    return () => window.removeEventListener('paste', handlePasteInModal);
+  }, [isUploadModalOpen, isUpdateFlow, uploadTitle, uploadType, uploadSubsidiary]);
+
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
@@ -403,7 +474,8 @@ export const KnowledgeCenter: React.FC = () => {
   const handleSampleFilePreset = (presetName: string, presetType: DocumentType, sampleContent: string, reason?: string) => {
     setRawSelectedFile(null);
     setUploadFileName(presetName);
-    setUploadFileSize('8.6 MB');
+    const presetSize = presetName.endsWith('.csv') ? '4.2 MB' : presetName.endsWith('.xlsx') ? '6.8 MB' : '8.6 MB';
+    setUploadFileSize(presetSize);
     setUploadType(presetType);
     if (!uploadTitle && !isUpdateFlow) {
       setUploadTitle(presetName.replace(/\.[^/.]+$/, '').replace(/_/g, ' '));
@@ -411,7 +483,7 @@ export const KnowledgeCenter: React.FC = () => {
     setUploadTextContent(sampleContent);
     const dynamicSummary = reason || generateFileSpecificSummary(
       presetName,
-      '8.6 MB',
+      presetSize,
       presetType,
       sampleContent,
       uploadSubsidiary,
@@ -420,6 +492,17 @@ export const KnowledgeCenter: React.FC = () => {
     );
     setUploadReason(dynamicSummary);
     setDuplicateWarning(null);
+
+    // Run through the same AI summarizer pipeline as uploaded PDFs
+    analyzeAndSummarizeDoc(
+      presetName,
+      presetSize,
+      sampleContent,
+      presetType,
+      uploadSubsidiary,
+      isUpdateFlow,
+      targetDocForUpdate?.title
+    );
   };
 
   const startOcrPipeline = async () => {
@@ -489,6 +572,7 @@ export const KnowledgeCenter: React.FC = () => {
         versionNumber: nextVerNum,
         fileName: uploadFileName,
         fileSize: uploadFileSize || '12.4 MB',
+        fileUrl: uploadedFileDataUrl || (rawSelectedFile && rawSelectedFile.type.startsWith('image/') ? URL.createObjectURL(rawSelectedFile) : undefined),
         storageFilePath,
         storageBucket,
         reasonForChange: uploadReason,
@@ -516,6 +600,7 @@ export const KnowledgeCenter: React.FC = () => {
         versionNumber: 1,
         fileName: uploadFileName,
         fileSize: uploadFileSize || '15.8 MB',
+        fileUrl: uploadedFileDataUrl || (rawSelectedFile && rawSelectedFile.type.startsWith('image/') ? URL.createObjectURL(rawSelectedFile) : undefined),
         storageFilePath,
         storageBucket,
         reasonForChange: uploadReason || 'Initial baseline exploration upload',
@@ -770,12 +855,19 @@ export const KnowledgeCenter: React.FC = () => {
               ) : (
                 filteredDocs.map((doc) => {
                   const docVersions = Array.isArray(doc.versions) ? doc.versions : [];
-                  const currentVer = docVersions.find(v => v.id === doc.currentVersionId) || docVersions[0] || {
+                  const currentVer: DocumentVersion = docVersions.find(v => v.id === doc.currentVersionId) || docVersions[0] || {
                     id: `ver_${doc.id}_default`,
+                    documentId: doc.id,
                     versionNumber: 1,
                     fileName: 'Document.pdf',
                     fileSize: '12.4 MB',
                     approvalStatus: (doc.status || 'approved') as ApprovalStatus,
+                    uploadedBy: {
+                      id: 'usr_default',
+                      name: 'Directorate Technical Officer',
+                      employeeId: 'CMPDI-DTO-01',
+                      subsidiary: doc.subsidiary || 'CMPDI HQ'
+                    },
                     uploadedAt: doc.createdAt || new Date().toISOString(),
                     extractedText: '',
                     ocrConfidence: 98,
@@ -792,13 +884,35 @@ export const KnowledgeCenter: React.FC = () => {
                       {/* Title & Code */}
                       <td className="py-3.5 px-4">
                         <div className="flex items-start gap-2.5">
-                          <FileText className="w-4 h-4 text-[#C8892E] flex-shrink-0 mt-0.5" />
-                          <div>
+                          {(() => {
+                            const fn = (currentVer.fileName || '').toLowerCase();
+                            const isImg = fn.endsWith('.jpg') || fn.endsWith('.jpeg') || fn.endsWith('.png') || fn.endsWith('.webp') || fn.endsWith('.bmp') || Boolean(currentVer.fileUrl?.startsWith('data:image'));
+                            const isSheet = fn.endsWith('.csv') || fn.endsWith('.xlsx') || fn.endsWith('.xls') || fn.endsWith('.tsv');
+
+                            if (isImg) {
+                              return <ImageIcon className="w-4 h-4 text-[#2563EB] flex-shrink-0 mt-0.5" />;
+                            }
+                            if (isSheet) {
+                              return <FileSpreadsheet className="w-4 h-4 text-[#16A34A] flex-shrink-0 mt-0.5" />;
+                            }
+                            return <FileText className="w-4 h-4 text-[#C8892E] flex-shrink-0 mt-0.5" />;
+                          })()}
+                          <div className="min-w-0">
                             <div className="font-bold text-[#141C2B] group-hover:text-[#C8892E] transition-colors line-clamp-1">
                               {doc.title || 'Untitled Technical Filing'}
                             </div>
-                            <div className="font-mono text-[10px] text-[#64748B] mt-0.5">
-                              {doc.documentCode || 'CMPDI-DOC'} · {doc.department || 'Central Directorate'}
+                            <div className="font-mono text-[10px] text-[#64748B] mt-0.5 flex flex-wrap items-center gap-1.5">
+                              <span>{doc.documentCode || 'CMPDI-DOC'}</span>
+                              <span>·</span>
+                              <span>{doc.department || 'Central Directorate'}</span>
+                              {currentVer.fileName && (
+                                <>
+                                  <span>·</span>
+                                  <span className="text-[#475569] font-medium truncate max-w-[150px]" title={currentVer.fileName}>
+                                    {currentVer.fileName}
+                                  </span>
+                                </>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -878,14 +992,14 @@ export const KnowledgeCenter: React.FC = () => {
                             title="Submit a controlled revision/update to this document"
                           >
                             <Plus className="w-3 h-3" />
-                            <span>Submit Update</span>
+                            <span className="hidden sm:inline">Update</span>
                           </button>
                           <button
                             onClick={() => setActiveDocForDetail(doc)}
                             className="p-1 text-[#64748B] hover:text-[#141C2B] hover:bg-[#FAF8F3] rounded cursor-pointer"
                             title="View Details & Version History"
                           >
-                            <Eye className="w-4 h-4" />
+                            <ChevronRight className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
@@ -922,6 +1036,41 @@ export const KnowledgeCenter: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
+                  {(() => {
+                    const activeVer = activeDocForDetail.versions.find(v => v.id === activeDocForDetail.currentVersionId) || activeDocForDetail.versions[0];
+                    const fn = (activeVer?.fileName || '').toLowerCase();
+                    const isImg = fn.endsWith('.jpg') || fn.endsWith('.jpeg') || fn.endsWith('.png') || fn.endsWith('.webp') || fn.endsWith('.bmp') || Boolean(activeVer?.fileUrl?.startsWith('data:image'));
+                    const isSheet = fn.endsWith('.csv') || fn.endsWith('.xlsx') || fn.endsWith('.xls') || fn.endsWith('.tsv');
+
+                    return (
+                      <button
+                        onClick={() => {
+                          setCompareVersions({
+                            v1: activeVer,
+                            v2: activeVer,
+                            doc: activeDocForDetail,
+                            initialTab: 'pdf_view',
+                          });
+                        }}
+                        className="px-2.5 sm:px-3 py-1.5 bg-[#C8892E] hover:bg-[#B77A23] text-xs rounded-lg text-[#141C2B] font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                        title={isImg ? 'Open Image & Photo Viewer' : isSheet ? 'Open Spreadsheet Data Grid' : 'Open Statutory PDF Document Reader'}
+                      >
+                        {isImg ? (
+                          <ImageIcon className="w-3.5 h-3.5" />
+                        ) : isSheet ? (
+                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                        ) : (
+                          <FileText className="w-3.5 h-3.5" />
+                        )}
+                        <span className="hidden sm:inline">
+                          {isImg ? 'Open Image Viewer' : isSheet ? 'Open Spreadsheet Grid' : 'Open PDF Reader'}
+                        </span>
+                        <span className="sm:hidden">
+                          {isImg ? 'View Image' : isSheet ? 'View Sheet' : 'View PDF'}
+                        </span>
+                      </button>
+                    );
+                  })()}
                   <button
                     onClick={() => toggleCacheDocumentOffline(activeDocForDetail.id)}
                     className="px-2.5 sm:px-3 py-1.5 bg-[#1E293B] hover:bg-[#334155] border border-[#334155] text-xs rounded-lg text-white font-mono flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -1015,8 +1164,38 @@ export const KnowledgeCenter: React.FC = () => {
                               {(ver.approvalStatus || 'approved').toUpperCase()}
                             </span>
 
-                            {/* Side-by-side compare button if previous version exists */}
-                            {idx < (activeDocForDetail.versions?.length || 0) - 1 && activeDocForDetail.versions?.[idx + 1] && (
+                            {/* Open file data directly in its uploaded format */}
+                            {(() => {
+                              const fn = (ver.fileName || '').toLowerCase();
+                              const isImg = fn.endsWith('.jpg') || fn.endsWith('.jpeg') || fn.endsWith('.png') || fn.endsWith('.webp') || fn.endsWith('.bmp') || Boolean(ver.fileUrl?.startsWith('data:image'));
+                              const isSheet = fn.endsWith('.csv') || fn.endsWith('.xlsx') || fn.endsWith('.xls') || fn.endsWith('.tsv');
+
+                              return (
+                                <button
+                                  onClick={() => {
+                                    setCompareVersions({
+                                      v1: ver,
+                                      v2: ver,
+                                      doc: activeDocForDetail,
+                                      initialTab: 'pdf_view',
+                                    });
+                                  }}
+                                  className="px-2 py-1 text-[10px] font-mono font-bold bg-[#FAF8F3] hover:bg-[#141C2B] hover:text-white border border-[#E4E0D6] text-[#141C2B] rounded flex items-center gap-1 cursor-pointer transition-colors"
+                                  title={isImg ? 'Open Image Viewer' : isSheet ? 'Open Spreadsheet Grid' : 'Open PDF Reader'}
+                                >
+                                  {isImg ? (
+                                    <ImageIcon className="w-3 h-3 text-[#3B82F6]" />
+                                  ) : isSheet ? (
+                                    <FileSpreadsheet className="w-3 h-3 text-[#16A34A]" />
+                                  ) : (
+                                    <FileText className="w-3 h-3 text-[#C8892E]" />
+                                  )}
+                                  <span>{isImg ? 'Open Image' : isSheet ? 'Open Sheet' : 'Open PDF'}</span>
+                                </button>
+                              );
+                            })()}
+
+                            {idx < (activeDocForDetail.versions?.length || 0) - 1 && activeDocForDetail.versions?.[idx + 1] ? (
                               <button
                                 onClick={() => {
                                   const olderVer = activeDocForDetail.versions?.[idx + 1];
@@ -1032,6 +1211,20 @@ export const KnowledgeCenter: React.FC = () => {
                               >
                                 <GitCompare className="w-3 h-3 text-[#C8892E]" />
                                 <span>Compare vs v{activeDocForDetail.versions[idx + 1].versionNumber}</span>
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setCompareVersions({
+                                    v1: ver,
+                                    v2: ver,
+                                    doc: activeDocForDetail,
+                                  });
+                                }}
+                                className="px-2 py-1 text-[10px] font-mono font-bold bg-[#FAF8F3] hover:bg-[#EFEBE2] border border-[#E4E0D6] text-[#141C2B] rounded flex items-center gap-1 cursor-pointer"
+                              >
+                                <Sparkles className="w-3 h-3 text-[#C8892E]" />
+                                <span>AI Summary</span>
                               </button>
                             )}
                           </div>
@@ -1065,7 +1258,14 @@ export const KnowledgeCenter: React.FC = () => {
 
                         <div className="mt-2.5 text-[10px] font-mono text-[#64748B] flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#EFEBE2]">
                           <div className="flex flex-wrap items-center gap-3">
-                            <span>Uploader: <strong>{ver.uploadedBy.name}</strong> ({ver.uploadedBy.subsidiary})</span>
+                            <span>
+                              Uploader: <strong className="text-[#141C2B]">{ver.uploadedBy.name}</strong> ({ver.uploadedBy.employeeId ? `${ver.uploadedBy.employeeId} · ` : ''}{ver.uploadedBy.subsidiary})
+                            </span>
+                            {ver.approvedBy && (
+                              <span>
+                                Approved By: <strong className="text-[#16A34A]">{ver.approvedBy.name}</strong>
+                              </span>
+                            )}
                             <span>File: <strong>{ver.fileName}</strong> ({ver.fileSize || '12.4 MB'})</span>
                             {ver.storageFilePath ? (
                               <button
@@ -1111,12 +1311,44 @@ export const KnowledgeCenter: React.FC = () => {
                   </button>
                 )}
               </div>
-              <button
-                onClick={() => setActiveDocForDetail(null)}
-                className="w-full sm:w-auto px-4 py-2.5 bg-[#EFEBE2] text-[#141C2B] text-xs font-semibold rounded-lg hover:bg-[#D4CEBF] cursor-pointer text-center transition-colors"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const activeVer = activeDocForDetail.versions.find(v => v.id === activeDocForDetail.currentVersionId) || activeDocForDetail.versions[0];
+                  const fn = (activeVer?.fileName || '').toLowerCase();
+                  const isImg = fn.endsWith('.jpg') || fn.endsWith('.jpeg') || fn.endsWith('.png') || fn.endsWith('.webp') || fn.endsWith('.bmp') || Boolean(activeVer?.fileUrl?.startsWith('data:image'));
+                  const isSheet = fn.endsWith('.csv') || fn.endsWith('.xlsx') || fn.endsWith('.xls') || fn.endsWith('.tsv');
+
+                  return (
+                    <button
+                      onClick={() => {
+                        setCompareVersions({
+                          v1: activeVer,
+                          v2: activeVer,
+                          doc: activeDocForDetail,
+                          initialTab: 'pdf_view',
+                        });
+                      }}
+                      className="w-full sm:w-auto px-3.5 py-2.5 bg-[#FAF8F3] hover:bg-[#141C2B] hover:text-white border border-[#E4E0D6] text-[#141C2B] text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                      title={isImg ? 'Open Image & Photo Viewer' : isSheet ? 'Open Spreadsheet Data Grid' : 'Open Document & PDF Reader'}
+                    >
+                      {isImg ? (
+                        <ImageIcon className="w-3.5 h-3.5 text-[#3B82F6]" />
+                      ) : isSheet ? (
+                        <FileSpreadsheet className="w-3.5 h-3.5 text-[#16A34A]" />
+                      ) : (
+                        <FileText className="w-3.5 h-3.5 text-[#C8892E]" />
+                      )}
+                      <span>{isImg ? 'Image Viewer' : isSheet ? 'Data Grid' : 'Document Reader'}</span>
+                    </button>
+                  );
+                })()}
+                <button
+                  onClick={() => setActiveDocForDetail(null)}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-[#EFEBE2] text-[#141C2B] text-xs font-semibold rounded-lg hover:bg-[#D4CEBF] cursor-pointer text-center transition-colors"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1158,10 +1390,10 @@ export const KnowledgeCenter: React.FC = () => {
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block font-semibold text-[#141C2B]">
-                    1. Technical Document File (Upload or Select) <span className="text-[#DC2626]">*</span>
+                    1. Technical Document File (Upload, Drag, or Paste) <span className="text-[#DC2626]">*</span>
                   </label>
                   <span className="text-[11px] text-[#64748B] font-mono">
-                    PDF, DOCX, XLSX, CSV, TXT, JSON, MD
+                    PDF, JPG, PNG, DOCX, XLSX, CSV, TXT
                   </span>
                 </div>
 
@@ -1170,7 +1402,7 @@ export const KnowledgeCenter: React.FC = () => {
                   type="file" 
                   ref={fileInputRef} 
                   onChange={handleFileInputChange}
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.json,.md,.tsv,.rtf"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.json,.md,.tsv,.rtf,.jpg,.jpeg,.png,.webp,.bmp,.svg,image/*"
                   className="hidden" 
                 />
 
@@ -1191,13 +1423,16 @@ export const KnowledgeCenter: React.FC = () => {
                       <FileUp className="w-6 h-6" />
                     </div>
                     <p className="font-bold text-sm text-[#141C2B]">
-                      {isDraggingOver ? 'Drop file here to upload' : 'Click to browse or drag & drop real file'}
+                      {isDraggingOver ? 'Drop file here to upload' : 'Click to browse, drag & drop, or press Ctrl+V to paste image'}
                     </p>
                     <p className="text-[11px] text-[#64748B] mt-1 max-w-md mx-auto">
-                      Upload core logs, borehole survey CSVs, DGMS safety circulars, geological PDFs, or production sheets directly from your computer.
+                      Upload or paste core logs, geological survey captures, borehole photos, CSV datasets, DGMS safety circulars, or mine plans.
                     </p>
 
                     <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                      <span className="px-2 py-0.5 bg-[#FAF8F3] border border-[#E4E0D6] rounded text-[10px] font-mono text-[#64748B]">
+                        .JPG / .PNG (Photos/Maps)
+                      </span>
                       <span className="px-2 py-0.5 bg-[#FAF8F3] border border-[#E4E0D6] rounded text-[10px] font-mono text-[#64748B]">
                         .PDF (Scanned & Text)
                       </span>

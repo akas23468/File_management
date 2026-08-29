@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Document, DocumentVersion, Subsidiary, ApprovalPriority, UserAccessRequest } from '../types';
 import { getStorageSignedUrl } from '../services/supabaseDataService';
+import { evaluateDocumentCompliance } from '../utils/complianceEngine';
 import { 
   CheckSquare, 
   GitCompare, 
@@ -47,9 +48,9 @@ export const ApprovalQueue: React.FC = () => {
     rejectAccessRequest
   } = useApp();
 
-  const [activeQueueTab, setActiveQueueTab] = useState<'pending' | 'reviewed' | 'access-requests'>('pending');
+  const [activeQueueTab, setActiveQueueTab] = useState<'pending' | 'access-requests'>('pending');
   const [priorityFilter, setPriorityFilter] = useState<string>('ALL');
-  const [reviewedStatusFilter, setReviewedStatusFilter] = useState<string>('ALL');
+  const [queueSubsidiaryFilter, setQueueSubsidiaryFilter] = useState<string>('ALL');
   const [selectedQueueItem, setSelectedQueueItem] = useState<{ doc: Document; version: DocumentVersion } | null>(null);
   const [actionModalType, setActionModalType] = useState<'approve' | 'reject' | 'changes' | null>(null);
   const [modalNote, setModalNote] = useState<string>('');
@@ -74,16 +75,14 @@ export const ApprovalQueue: React.FC = () => {
     }
   };
 
-  // Collect pending approvals
+  // Collect pending approvals across all documents
   const pendingItems: { doc: Document; version: DocumentVersion }[] = [];
-  const reviewedItems: { doc: Document; version: DocumentVersion }[] = [];
 
-  documents.forEach(doc => {
+  (documents || []).forEach(doc => {
+    if (!doc || !Array.isArray(doc.versions)) return;
     doc.versions.forEach(v => {
-      if (v.approvalStatus === 'pending') {
+      if (v && v.approvalStatus === 'pending') {
         pendingItems.push({ doc, version: v });
-      } else {
-        reviewedItems.push({ doc, version: v });
       }
     });
   });
@@ -91,20 +90,10 @@ export const ApprovalQueue: React.FC = () => {
   const pendingAccessRequestsCount = accessRequests.filter(r => r.status === 'pending').length;
 
   const filteredPendingQueue = pendingItems.filter(item => {
-    if (selectedSubsidiary !== 'ALL' && item.doc.subsidiary !== selectedSubsidiary && item.doc.subsidiary !== 'CMPDI HQ') {
+    if (queueSubsidiaryFilter !== 'ALL' && item.doc.subsidiary !== queueSubsidiaryFilter) {
       return false;
     }
     if (priorityFilter !== 'ALL' && item.version.approvalPriority !== priorityFilter) {
-      return false;
-    }
-    return true;
-  });
-
-  const filteredReviewedQueue = reviewedItems.filter(item => {
-    if (selectedSubsidiary !== 'ALL' && item.doc.subsidiary !== selectedSubsidiary && item.doc.subsidiary !== 'CMPDI HQ') {
-      return false;
-    }
-    if (reviewedStatusFilter !== 'ALL' && item.version.approvalStatus !== reviewedStatusFilter) {
       return false;
     }
     return true;
@@ -169,7 +158,7 @@ export const ApprovalQueue: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Tabs: Pending vs Reviewed Archive vs User Access Requests */}
+      {/* Main Tabs: Pending Submissions vs User Access Requests */}
       <div className="flex border-b border-[#E4E0D6] gap-2 overflow-x-auto">
         <button
           onClick={() => setActiveQueueTab('pending')}
@@ -185,21 +174,6 @@ export const ApprovalQueue: React.FC = () => {
             pendingItems.length > 0 ? 'bg-[#141C2B] text-white font-bold' : 'bg-[#E2E8F0] text-[#64748B]'
           }`}>
             {pendingItems.length}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setActiveQueueTab('reviewed')}
-          className={`pb-3 px-4 font-serif text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
-            activeQueueTab === 'reviewed'
-              ? 'border-[#141C2B] text-[#141C2B]'
-              : 'border-transparent text-[#64748B] hover:text-[#141C2B]'
-          }`}
-        >
-          <History className="w-4 h-4" />
-          <span>Decision Log & Reviewed Archive</span>
-          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-[#E2E8F0] text-[#64748B]">
-            {reviewedItems.length}
           </span>
         </button>
 
@@ -229,7 +203,7 @@ export const ApprovalQueue: React.FC = () => {
             <div className="flex flex-wrap items-center gap-3 text-xs">
               <div className="flex items-center gap-1.5 text-[#64748B] font-medium">
                 <Filter className="w-3.5 h-3.5 text-[#C8892E]" />
-                <span>Priority Filter:</span>
+                <span>Priority:</span>
               </div>
 
               <button
@@ -238,7 +212,7 @@ export const ApprovalQueue: React.FC = () => {
                   priorityFilter === 'ALL' ? 'bg-[#141C2B] text-white' : 'bg-[#FAF8F3] text-[#64748B] hover:bg-[#EFEBE2]'
                 }`}
               >
-                All Items ({pendingItems.length})
+                All ({pendingItems.length})
               </button>
 
               <button
@@ -268,6 +242,28 @@ export const ApprovalQueue: React.FC = () => {
               >
                 Routine ({routineCount})
               </button>
+
+              <div className="h-4 w-px bg-[#E4E0D6] mx-1 hidden sm:block" />
+
+              {/* Subsidiary filter dropdown */}
+              <div className="flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-[#64748B]" />
+                <select
+                  value={queueSubsidiaryFilter}
+                  onChange={(e) => setQueueSubsidiaryFilter(e.target.value)}
+                  className="bg-[#FAF8F3] border border-[#E4E0D6] text-[#141C2B] text-xs rounded-lg px-2.5 py-1.5 font-medium focus:ring-1 focus:ring-[#C8892E] outline-none cursor-pointer"
+                >
+                  <option value="ALL">All Subsidiaries</option>
+                  <option value="CMPDI HQ">CMPDI HQ</option>
+                  <option value="BCCL">BCCL</option>
+                  <option value="SECL">SECL</option>
+                  <option value="ECL">ECL</option>
+                  <option value="CCL">CCL</option>
+                  <option value="WCL">WCL</option>
+                  <option value="MCL">MCL</option>
+                  <option value="NCL">NCL</option>
+                </select>
+              </div>
             </div>
 
             <span className="text-xs font-mono text-[#64748B]">
@@ -299,12 +295,21 @@ export const ApprovalQueue: React.FC = () => {
                 {filteredPendingQueue.map(({ doc, version }) => {
                   const isUrgent = version.approvalPriority === 'urgent';
                   const previousVersion = doc.versions.find(v => v.versionNumber === version.versionNumber - 1) || doc.versions[1] || doc.versions[0];
+                  const aiEval = evaluateDocumentCompliance(doc, version);
 
                   return (
                     <div 
                       key={version.id}
+                      id={`queue-item-${doc.id}`}
+                      data-doc-id={doc.id}
+                      data-doc-code={doc.documentCode}
+                      data-version-id={version.id}
                       className={`p-5 transition-all ${
-                        isUrgent ? 'bg-[#FFFBFB]' : 'hover:bg-[#FAF8F3]'
+                        aiEval.categoryMismatch 
+                          ? 'bg-[#FEF2F2]/40 border-l-4 border-l-[#DC2626]' 
+                          : isUrgent 
+                          ? 'bg-[#FFFBFB] border-l-4 border-l-[#DC2626]' 
+                          : 'hover:bg-[#FAF8F3]'
                       }`}
                     >
                       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-5">
@@ -322,6 +327,14 @@ export const ApprovalQueue: React.FC = () => {
                               {isUrgent ? '🔴 Urgent' : version.approvalPriority === 'normal' ? '🟡 Normal' : '🟢 Routine'}
                             </span>
 
+                            {/* Category Mismatch Pill */}
+                            {aiEval.categoryMismatch && (
+                              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-[#DC2626] text-white flex items-center gap-1 shadow-2xs">
+                                <AlertTriangle className="w-3 h-3" />
+                                <span>Category Mismatch: Unrelated Content</span>
+                              </span>
+                            )}
+
                             <span className="font-mono text-xs font-bold bg-[#EFEBE2] px-2 py-0.5 rounded text-[#141C2B]">
                               {doc.documentCode}
                             </span>
@@ -333,11 +346,35 @@ export const ApprovalQueue: React.FC = () => {
                             <span className="text-[11px] font-mono font-semibold bg-[#FAF8F3] px-2 py-0.5 rounded border border-[#E4E0D6] text-[#141C2B]">
                               {doc.subsidiary}
                             </span>
+
+                            {/* Compliance Score Badges */}
+                            <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded border ${
+                              aiEval.overallScore >= 80 
+                                ? 'bg-[#F0FDF4] text-[#16A34A] border-[#BBF7D0]' 
+                                : aiEval.overallScore >= 60 
+                                ? 'bg-[#FEF3C7] text-[#D97706] border-[#FDE68A]' 
+                                : 'bg-[#FEF2F2] text-[#DC2626] border-[#FECACA]'
+                            }`}>
+                              Compliance: {aiEval.overallScore}% (Fmt: {aiEval.formatScore}% · Cont: {aiEval.contentScore}%)
+                            </span>
                           </div>
 
                           <h4 className="font-serif font-bold text-base text-[#141C2B]">
                             {doc.title}
                           </h4>
+
+                          {/* Category Mismatch Alert */}
+                          {aiEval.categoryMismatch && (
+                            <div className="p-3 bg-[#FEF2F2] border border-[#FECACA] rounded-lg text-xs text-[#991B1B] space-y-1.5">
+                              <div className="flex items-center gap-1.5 font-bold">
+                                <AlertTriangle className="w-4 h-4 text-[#DC2626] flex-shrink-0" />
+                                <span>Subject Matter Unrelated to {doc.type.replace(/_/g, ' ')} for {doc.subsidiary}</span>
+                              </div>
+                              <p className="text-[11px] leading-relaxed text-[#7F1D1D]">
+                                Detected subject matter: <strong className="font-mono text-[#DC2626]">{aiEval.detectedSubject}</strong> (Expected: <strong className="font-mono text-[#15803D]">{aiEval.expectedCategory}</strong>). Approval is locked to prevent non-mining data indexing.
+                              </p>
+                            </div>
+                          )}
 
                           {/* Submitter & Timeline Step Box */}
                           <div className="bg-[#FAF8F3] border border-[#E4E0D6] rounded-lg p-3 space-y-2 text-xs">
@@ -376,7 +413,7 @@ export const ApprovalQueue: React.FC = () => {
                           </div>
 
                           {/* AI Risk Reasoning if urgent */}
-                          {version.aiRiskReason && (
+                          {version.aiRiskReason && !aiEval.categoryMismatch && (
                             <div className="p-2.5 bg-[#FEF2F2] border border-[#FECACA] rounded-lg text-xs text-[#991B1B] flex items-start gap-2">
                               <AlertTriangle className="w-4 h-4 text-[#DC2626] flex-shrink-0 mt-0.5" />
                               <div>
@@ -396,16 +433,25 @@ export const ApprovalQueue: React.FC = () => {
                             className="px-3 py-2 bg-[#141C2B] hover:bg-[#1E293B] text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-xs w-full cursor-pointer"
                           >
                             <GitCompare className="w-3.5 h-3.5 text-[#C8892E]" />
-                            <span>Compare Side-by-Side Diff</span>
+                            <span>
+                              {version.versionNumber === 1 || !previousVersion || previousVersion.id === version.id
+                                ? 'Review & Benchmark Compare' 
+                                : 'Compare Side-by-Side Diff'}
+                            </span>
                           </button>
 
                           {/* Action Row */}
-                          <div className="flex items-center gap-1.5 w-full">
+                          <div className="flex items-center gap-2 w-full">
                             <button
                               id={`btn-approve-${version.id}`}
                               onClick={() => handleOpenActionModal({ doc, version }, 'approve')}
-                              className="flex-1 px-3 py-2 bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer"
-                              title="Approve and reindex chunk into knowledge base"
+                              disabled={aiEval.categoryMismatch}
+                              className={`flex-1 px-3 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer ${
+                                aiEval.categoryMismatch 
+                                  ? 'bg-[#94A3B8] text-white cursor-not-allowed opacity-60' 
+                                  : 'bg-[#16A34A] hover:bg-[#15803D] text-white'
+                              }`}
+                              title={aiEval.categoryMismatch ? "Cannot approve: Document content does not match category" : "Approve and reindex chunk into knowledge base"}
                             >
                               <Check className="w-3.5 h-3.5" />
                               <span>Approve</span>
@@ -413,18 +459,11 @@ export const ApprovalQueue: React.FC = () => {
 
                             <button
                               onClick={() => handleOpenActionModal({ doc, version }, 'changes')}
-                              className="px-2.5 py-2 bg-[#FAF8F3] hover:bg-[#EFEBE2] border border-[#E4E0D6] text-xs font-semibold text-[#141C2B] rounded-lg transition-all cursor-pointer"
+                              className="px-3 py-2 bg-[#FAF8F3] hover:bg-[#EFEBE2] border border-[#E4E0D6] text-xs font-semibold text-[#141C2B] rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
                               title="Request changes / ask for more data"
                             >
-                              <MessageSquare className="w-3.5 h-3.5 text-[#64748B]" />
-                            </button>
-
-                            <button
-                              onClick={() => handleOpenActionModal({ doc, version }, 'reject')}
-                              className="px-2.5 py-2 bg-[#FEF2F2] hover:bg-[#FEE2E2] border border-[#FECACA] text-xs font-semibold text-[#DC2626] rounded-lg transition-all cursor-pointer"
-                              title="Reject submission"
-                            >
-                              <X className="w-3.5 h-3.5" />
+                              <MessageSquare className="w-3.5 h-3.5 text-[#C8892E]" />
+                              <span>Request Changes</span>
                             </button>
                           </div>
                         </div>
@@ -438,200 +477,7 @@ export const ApprovalQueue: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 2: DECISION LOG & REVIEWED ARCHIVE */}
-      {activeQueueTab === 'reviewed' && (
-        <div className="space-y-5">
-          {/* Status Filter Toolbar */}
-          <div className="bg-white border border-[#E4E0D6] rounded-xl p-4 shadow-xs flex flex-wrap items-center justify-between gap-4">
-            <div className="flex flex-wrap items-center gap-3 text-xs">
-              <div className="flex items-center gap-1.5 text-[#64748B] font-medium">
-                <Filter className="w-3.5 h-3.5 text-[#C8892E]" />
-                <span>Decision Status:</span>
-              </div>
-
-              <button
-                onClick={() => setReviewedStatusFilter('ALL')}
-                className={`px-3 py-1.5 rounded-lg font-mono text-xs font-bold transition-all ${
-                  reviewedStatusFilter === 'ALL' ? 'bg-[#141C2B] text-white' : 'bg-[#FAF8F3] text-[#64748B] hover:bg-[#EFEBE2]'
-                }`}
-              >
-                All Decisions ({reviewedItems.length})
-              </button>
-
-              <button
-                onClick={() => setReviewedStatusFilter('approved')}
-                className={`px-3 py-1.5 rounded-lg font-mono text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  reviewedStatusFilter === 'approved' ? 'bg-[#16A34A] text-white' : 'bg-[#F0FDF4] text-[#166534] hover:bg-[#DCFCE7]'
-                }`}
-              >
-                <Check className="w-3 h-3" />
-                <span>Approved</span>
-              </button>
-
-              <button
-                onClick={() => setReviewedStatusFilter('rejected')}
-                className={`px-3 py-1.5 rounded-lg font-mono text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  reviewedStatusFilter === 'rejected' ? 'bg-[#DC2626] text-white' : 'bg-[#FEF2F2] text-[#DC2626] hover:bg-[#FEE2E2]'
-                }`}
-              >
-                <X className="w-3 h-3" />
-                <span>Rejected</span>
-              </button>
-
-              <button
-                onClick={() => setReviewedStatusFilter('changes_requested')}
-                className={`px-3 py-1.5 rounded-lg font-mono text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  reviewedStatusFilter === 'changes_requested' ? 'bg-[#D97706] text-white' : 'bg-[#FEF3C7] text-[#92400E] hover:bg-[#FDE68A]'
-                }`}
-              >
-                <MessageSquare className="w-3 h-3" />
-                <span>Changes Requested</span>
-              </button>
-            </div>
-
-            <span className="text-xs font-mono text-[#64748B]">
-              Showing {filteredReviewedQueue.length} records
-            </span>
-          </div>
-
-          {/* Reviewed Decisions List */}
-          <div className="bg-white border border-[#E4E0D6] rounded-xl overflow-hidden shadow-xs">
-            <div className="p-4 border-b border-[#EFEBE2] flex items-center justify-between">
-              <h3 className="font-serif font-bold text-base text-[#141C2B]">
-                Central Directorate Decision Archive & Audit Records
-              </h3>
-              <span className="text-xs font-mono text-[#64748B]">
-                Full Who-Did-What Traceability
-              </span>
-            </div>
-
-            {filteredReviewedQueue.length === 0 ? (
-              <div className="p-12 text-center bg-[#FAF8F3]">
-                <History className="w-10 h-10 text-[#64748B] mx-auto mb-2" />
-                <h4 className="font-serif font-bold text-base text-[#141C2B]">No Decision Records Found</h4>
-                <p className="text-xs text-[#64748B] mt-1">
-                  There are no archived review decisions matching the active filter.
-                </p>
-              </div>
-            ) : (
-              <div className="divide-y divide-[#EFEBE2]">
-                {filteredReviewedQueue.map(({ doc, version }) => {
-                  const isApproved = version.approvalStatus === 'approved';
-                  const isRejected = version.approvalStatus === 'rejected';
-                  const reviewerName = version.reviewedBy?.name || version.approvedBy?.name || 'Dr. Arindam Mukherjee (Chief Mining Engineer)';
-                  const reviewTime = version.reviewedAt || version.approvedAt || version.uploadedAt;
-                  const reviewerNote = version.reviewerNote || version.rejectedReason || version.changesRequestedNote || (isApproved ? 'Baseline technical filing in repository. Statutory verification approved.' : 'Review feedback logged.');
-
-                  return (
-                    <div key={version.id} className="p-5 hover:bg-[#FAF8F3] transition-colors space-y-3">
-                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase tracking-wider flex items-center gap-1 ${
-                            isApproved 
-                              ? 'bg-[#F0FDF4] text-[#166534] border border-[#BBF7D0]' 
-                              : isRejected 
-                                ? 'bg-[#FEF2F2] text-[#991B1B] border border-[#FECACA]' 
-                                : 'bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]'
-                          }`}>
-                            {isApproved && <CheckCircle2 className="w-3 h-3 text-[#16A34A]" />}
-                            {isRejected && <AlertCircle className="w-3 h-3 text-[#DC2626]" />}
-                            {!isApproved && !isRejected && <Clock className="w-3 h-3 text-[#D97706]" />}
-                            <span>{version.approvalStatus.replace(/_/g, ' ')}</span>
-                          </span>
-
-                          <span className="font-mono text-xs font-bold bg-[#EFEBE2] px-2 py-0.5 rounded text-[#141C2B]">
-                            {doc.documentCode} v{version.versionNumber}.0
-                          </span>
-
-                          <span className="text-[11px] font-mono font-semibold bg-[#FAF8F3] px-2 py-0.5 rounded border border-[#E4E0D6] text-[#141C2B]">
-                            {doc.subsidiary}
-                          </span>
-                        </div>
-
-                        {/* Compare Diff & File Link */}
-                        <div className="flex items-center gap-2">
-                          {doc.versions.length > 1 && (
-                            <button
-                              onClick={() => {
-                                const prev = doc.versions.find(v => v.versionNumber === version.versionNumber - 1) || doc.versions[0];
-                                setCompareVersions({ v1: prev, v2: version, doc });
-                              }}
-                              className="px-2.5 py-1.5 bg-[#FAF8F3] hover:bg-[#EFEBE2] border border-[#E4E0D6] rounded-lg text-xs font-semibold text-[#141C2B] flex items-center gap-1 cursor-pointer"
-                            >
-                              <GitCompare className="w-3.5 h-3.5 text-[#C8892E]" />
-                              <span>Diff</span>
-                            </button>
-                          )}
-
-                          {version.storageFilePath && (
-                            <button
-                              onClick={() => handleOpenStorageFile(version.storageFilePath, version.fileName)}
-                              disabled={loadingSignedUrlPath === version.storageFilePath}
-                              className="px-2.5 py-1.5 bg-[#FAF8F3] hover:bg-[#EFEBE2] border border-[#E4E0D6] rounded-lg text-xs font-semibold text-[#141C2B] flex items-center gap-1 cursor-pointer"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5 text-[#C8892E]" />
-                              <span>File</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <h4 className="font-serif font-bold text-base text-[#141C2B]">
-                        {doc.title}
-                      </h4>
-
-                      {/* Step-by-Step Governance Timeline Grid */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                        {/* Step 1: Submitter Box */}
-                        <div className="bg-white p-3 rounded-lg border border-[#E4E0D6] space-y-1.5">
-                          <div className="flex items-center justify-between text-[#64748B] border-b border-[#EFEBE2] pb-1.5">
-                            <span className="font-bold text-[#141C2B] flex items-center gap-1">
-                              <FileText className="w-3.5 h-3.5 text-[#C8892E]" />
-                              <span>Step 1: Submitted</span>
-                            </span>
-                            <span className="font-mono text-[11px]">
-                              {new Date(version.uploadedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                          <div className="text-[#141C2B]">
-                            <strong>Officer:</strong> {version.uploadedBy.name} ({version.uploadedBy.employeeId || 'EMP-01'} • {version.uploadedBy.subsidiary})
-                          </div>
-                          <div className="text-[#475569] text-[11px]">
-                            <strong>Reason:</strong> {version.reasonForChange}
-                          </div>
-                        </div>
-
-                        {/* Step 2: Reviewer Box */}
-                        <div className={`p-3 rounded-lg border space-y-1.5 ${
-                          isApproved ? 'bg-[#F0FDF4]/50 border-[#BBF7D0]' : isRejected ? 'bg-[#FEF2F2]/50 border-[#FECACA]' : 'bg-[#FEF3C7]/50 border-[#FDE68A]'
-                        }`}>
-                          <div className="flex items-center justify-between text-[#64748B] border-b border-[#EFEBE2] pb-1.5">
-                            <span className="font-bold text-[#141C2B] flex items-center gap-1">
-                              <ShieldCheck className="w-3.5 h-3.5 text-[#16A34A]" />
-                              <span>Step 2: Reviewed & Decided</span>
-                            </span>
-                            <span className="font-mono text-[11px]">
-                              {new Date(reviewTime).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                          <div className="text-[#141C2B]">
-                            <strong>Reviewer:</strong> {reviewerName}
-                          </div>
-                          <div className="text-[#334155] text-[11px]">
-                            <strong>Reviewer's Note:</strong> {reviewerNote}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: USER ACCESS REQUESTS */}
+      {/* TAB 2: USER ACCESS REQUESTS */}
       {activeQueueTab === 'access-requests' && (
         <div className="space-y-6">
           <div className="bg-white border border-[#E4E0D6] rounded-xl p-5 shadow-xs">
@@ -835,9 +681,73 @@ export const ApprovalQueue: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#141C2B] mb-1">
-                {actionModalType === 'approve' ? 'Sign-Off Directorate Note / Justification:' : 'Detailed Statutory Feedback / Reason:'}
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-[#141C2B]">
+                  {actionModalType === 'approve' ? 'Sign-Off Directorate Note / Justification:' : 'Detailed Statutory Feedback / Directives:'}
+                </label>
+                {actionModalType === 'changes' && modalNote && (
+                  <button
+                    type="button"
+                    onClick={() => setModalNote('')}
+                    className="text-[10px] text-[#DC2626] hover:underline cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {actionModalType === 'changes' && (
+                <div className="mb-2 p-2.5 bg-[#FAF8F3] rounded-lg border border-[#E4E0D6] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono font-bold text-[#141C2B] flex items-center gap-1 uppercase">
+                      <Sparkles className="w-3 h-3 text-[#C8892E]" />
+                      AI Templates & Presets:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const v = selectedQueueItem.version;
+                        const d = selectedQueueItem.doc;
+                        const evalResult = evaluateDocumentCompliance(d, v);
+                        setModalNote(evalResult.suggestedActionDirective);
+                      }}
+                      className="px-2 py-0.5 bg-[#141C2B] hover:bg-[#1E293B] text-white text-[10px] font-bold font-mono rounded flex items-center gap-1 cursor-pointer"
+                    >
+                      <Sparkles className="w-2.5 h-2.5 text-[#E2B13C]" />
+                      <span>Auto-Draft with AI</span>
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {(() => {
+                      const evalResult = evaluateDocumentCompliance(selectedQueueItem.doc, selectedQueueItem.version);
+                      const presets = [];
+                      if (evalResult.categoryMismatch) {
+                        presets.push({
+                          l: '⚠️ Category Mismatch Notice',
+                          t: `Category Mismatch: The submitted file "${selectedQueueItem.version.fileName || selectedQueueItem.doc.title}" contains subject matter (${evalResult.detectedSubject}) unrelated to statutory mining category (${selectedQueueItem.doc.type.replace(/_/g, ' ')}). Please provide the authorized statutory filing or amend filing classification.`
+                        });
+                      }
+                      presets.push(
+                        { l: '📊 Overburden Cross-Section', t: 'Please furnish updated Seam-IV overburden geological cross-sections and calibrate stripping ratio assays.' },
+                        { l: '✍️ Missing DGMS Sign-off', t: `Please ensure this filing includes authorized digital endorsement from the ${selectedQueueItem.doc.subsidiary} Area Safety Officer.` },
+                        { l: '🌱 EMP Clearance Memo', t: 'Please attach the corresponding Environmental Management Plan (EMP) clearance certificate.' },
+                        { l: '🔬 Proximate Assays', t: 'Observed variance in proximate analysis. Kindly calibrate ash and moisture percentages with CMPDI lab assay reports.' }
+                      );
+                      return presets.map((item, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setModalNote(item.t)}
+                          className="text-[10px] bg-white hover:bg-[#F3EFE6] text-[#334155] border border-[#E2DDD2] hover:border-[#C8892E] rounded px-2 py-0.5 cursor-pointer text-left transition-all"
+                        >
+                          {item.l}
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
+
               <textarea
                 rows={3}
                 value={modalNote}
@@ -845,7 +755,7 @@ export const ApprovalQueue: React.FC = () => {
                 placeholder={
                   actionModalType === 'approve'
                     ? 'e.g. Verified against CMPDI Central Borehole Log Database. Approved for live RAG synthesis.'
-                    : 'e.g. Discrepancy observed in ash content calibration on Seam IV. Please re-assay.'
+                    : 'Click a preset above or type specific revision instructions for the officer...'
                 }
                 className="w-full p-3 bg-[#FAF8F3] border border-[#E4E0D6] rounded-lg text-xs"
               />

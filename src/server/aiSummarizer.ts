@@ -9,7 +9,14 @@ export function getGeminiClient(): GoogleGenAI | null {
     return null;
   }
   if (!geminiClient) {
-    geminiClient = new GoogleGenAI({ apiKey: apiKey.trim() });
+    geminiClient = new GoogleGenAI({
+      apiKey: apiKey.trim(),
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
   }
   return geminiClient;
 }
@@ -70,37 +77,47 @@ Respond ONLY with valid JSON in this exact structure:
   "keyHighlights": ["Highlight 1", "Highlight 2"]
 }`;
 
-  // 1. Try Google Gemini API with multi-model fallback and retries
-  const geminiModels = ['gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-1.5-flash', 'gemini-2.5-pro'];
+  // 1. Try Google Gemini API with supported models and graceful multi-model fallback
+  const geminiModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.7-flash'];
   const ai = getGeminiClient();
 
   if (ai) {
     for (const modelName of geminiModels) {
-      try {
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            temperature: 0.2,
-          },
-        });
+      let attempts = 0;
+      while (attempts < 2) {
+        attempts++;
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+              temperature: 0.2,
+            },
+          });
 
-        const rawJson = response.text?.trim();
-        if (rawJson) {
-          const parsed = JSON.parse(rawJson);
-          return {
-            title: parsed.title,
-            summary: parsed.summary,
-            detectedType: parsed.detectedType,
-            tags: parsed.tags,
-            keyHighlights: parsed.keyHighlights,
-            provider: 'gemini',
-          };
+          const rawJson = response.text?.trim();
+          if (rawJson) {
+            const parsed = JSON.parse(rawJson);
+            return {
+              title: parsed.title,
+              summary: parsed.summary,
+              detectedType: parsed.detectedType,
+              tags: parsed.tags,
+              keyHighlights: parsed.keyHighlights,
+              provider: 'gemini',
+            };
+          }
+          break;
+        } catch (geminiErr: any) {
+          const errMsg = geminiErr?.message || String(geminiErr);
+          const isTransient = errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('429') || errMsg.includes('ResourceExhausted');
+          if (isTransient && attempts < 2) {
+            await new Promise(r => setTimeout(r, 600));
+            continue;
+          }
+          break;
         }
-      } catch (geminiErr: any) {
-        const errMsg = geminiErr?.message || String(geminiErr);
-        console.warn(`[AI Summarizer] Gemini model ${modelName} unavailable (${errMsg.slice(0, 100)}), trying fallback...`);
       }
     }
   }

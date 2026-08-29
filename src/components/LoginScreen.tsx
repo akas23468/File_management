@@ -176,7 +176,7 @@ export const LoginScreen: React.FC = () => {
       setLoginPassword('');
       setLoginError(null);
       setSignupSuccessMessage(
-        res.message || 'Account created — check your email to confirm, then sign in.'
+        'Account created successfully! Enter your password below to sign in directly.'
       );
       setViewMode('login');
     } catch (err: any) {
@@ -227,6 +227,35 @@ export const LoginScreen: React.FC = () => {
     } catch (err: any) {
       setIsSendingReset(false);
       setForgotError(err?.message || 'Failed to dispatch reset request.');
+    }
+  };
+
+  // Handle Resend Confirmation Email
+  const [resendStatus, setResendStatus] = useState<string | null>(null);
+  const handleResendConfirmation = async () => {
+    const cleanEmail = loginIdentifier.trim();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setLoginError({ message: 'Please enter your registered email address in the field below first.' });
+      return;
+    }
+    const client = getSupabase() || supabase;
+    if (client) {
+      try {
+        setResendStatus('Sending...');
+        const { error } = await client.auth.resend({
+          type: 'signup',
+          email: cleanEmail,
+        });
+        if (error) {
+          setResendStatus(null);
+          setLoginError({ message: `Resend failed: ${error.message}` });
+        } else {
+          setResendStatus('Confirmation link resent! Check your inbox and spam folder.');
+        }
+      } catch (err: any) {
+        setResendStatus(null);
+        setLoginError({ message: err?.message || 'Failed to resend confirmation email.' });
+      }
     }
   };
 
@@ -355,18 +384,41 @@ export const LoginScreen: React.FC = () => {
               {loginError && (
                 <div 
                   id="auth-error-alert"
-                  className={`p-3 rounded-xl border text-xs leading-relaxed flex items-start gap-2.5 shadow-xs ${
+                  className={`p-3 rounded-xl border text-xs leading-relaxed space-y-2 shadow-xs ${
                     loginError.status === 'pending'
-                      ? 'bg-[#FEF3C7]/90 border-[#FDE68A] text-[#92400E]'
-                      : 'bg-[#FEF2F2]/90 border-[#FECACA] text-[#991B1B]'
+                      ? 'bg-[#FEF3C7]/95 border-[#FDE68A] text-[#92400E]'
+                      : 'bg-[#FEF2F2]/95 border-[#FECACA] text-[#991B1B]'
                   }`}
                 >
-                  {loginError.status === 'pending' ? (
-                    <Clock className="w-4 h-4 text-[#D97706] flex-shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-[#DC2626] flex-shrink-0 mt-0.5" />
+                  <div className="flex items-start gap-2.5">
+                    {loginError.status === 'pending' ? (
+                      <Clock className="w-4 h-4 text-[#D97706] flex-shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-[#DC2626] flex-shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1">
+                      <p className="font-medium">{loginError.message}</p>
+                      {resendStatus && (
+                        <p className="text-[#166534] font-medium mt-1 bg-white/80 p-1.5 rounded border border-[#86EFAC]">
+                          {resendStatus}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* If email confirmation or account issue, provide 1-click resend */}
+                  {(loginError.message.toLowerCase().includes('confirm') || loginError.message.toLowerCase().includes('email')) && (
+                    <div className="pt-1.5 border-t border-[#FECACA]/60 flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-[#7F1D1D]">Didn't get the email link?</span>
+                      <button
+                        type="button"
+                        onClick={handleResendConfirmation}
+                        className="px-2.5 py-1 bg-white hover:bg-[#FAF8F3] text-[#141C2B] font-semibold text-[11px] rounded-lg border border-[#E4E0D6] shadow-2xs cursor-pointer transition-all"
+                      >
+                        Resend Confirmation Link
+                      </button>
+                    </div>
                   )}
-                  <p className="font-medium">{loginError.message}</p>
                 </div>
               )}
 

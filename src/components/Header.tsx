@@ -1,39 +1,19 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { Subsidiary } from '../types';
 import { 
-  Building2, 
-  Search, 
   Wifi, 
   WifiOff, 
-  Menu,
-  User,
-  ShieldCheck
+  Menu
 } from 'lucide-react';
-
-const SUBSIDIARIES: (Subsidiary | 'ALL')[] = [
-  'ALL',
-  'CMPDI HQ',
-  'SECL',
-  'BCCL',
-  'NCL',
-  'CCL',
-  'ECL',
-  'WCL',
-  'MCL',
-];
 
 export const Header: React.FC = () => {
   const { 
     currentUser, 
     activeView, 
-    selectedSubsidiary, 
-    setSelectedSubsidiary,
     isUndergroundModeActive,
     toggleSimulateOffline,
     toggleMobileNav,
     cachedDocumentIds,
-    documents,
     offlineStorageSizeBytes,
     setActiveView
   } = useApp();
@@ -110,27 +90,9 @@ export const Header: React.FC = () => {
         </div>
       </div>
 
-      {/* Simplified Top Bar: 3 Core Items (Subsidiary, Offline Mode, User/Role Pill) */}
+      {/* Top Bar Controls (Offline Mode, User/Role Pill) */}
       <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-        {/* 1. Subsidiary Scope Selector */}
-        <div className="flex items-center gap-1.5 bg-[#FAF8F3] border border-[#E4E0D6] rounded-lg px-2.5 py-1.5 shadow-2xs">
-          <Building2 className="w-3.5 h-3.5 text-[#C8892E]" />
-          <select
-            id="select-subsidiary-scope"
-            value={selectedSubsidiary}
-            onChange={(e) => setSelectedSubsidiary(e.target.value as Subsidiary | 'ALL')}
-            className="text-xs font-mono font-bold bg-transparent text-[#141C2B] focus:outline-none cursor-pointer"
-            title="Filter data scope by Subsidiary"
-          >
-            {SUBSIDIARIES.map((sub) => (
-              <option key={sub} value={sub}>
-                {sub === 'ALL' ? 'All Subsidiaries' : sub}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* 2. Underground Mode Switch */}
+        {/* Underground Mode Switch */}
         <button
           id="btn-toggle-underground-mode"
           onClick={toggleSimulateOffline}

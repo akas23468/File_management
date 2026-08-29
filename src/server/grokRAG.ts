@@ -11,7 +11,14 @@ function getGeminiInstance(): GoogleGenAI | null {
     return null;
   }
   if (!geminiClient) {
-    geminiClient = new GoogleGenAI({ apiKey: apiKey.trim() });
+    geminiClient = new GoogleGenAI({
+      apiKey: apiKey.trim(),
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
   }
   return geminiClient;
 }
@@ -248,64 +255,75 @@ Respond ONLY in valid JSON matching:
   "citedChunkIndices": [1, 2]
 }`;
 
-    const geminiModels = ['gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-1.5-flash'];
+    const geminiModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.7-flash'];
     for (const gModel of geminiModels) {
-      try {
-        const result = await geminiAI.models.generateContent({
-          model: gModel,
-          contents: geminiPrompt,
-          config: {
-            responseMimeType: 'application/json',
-            temperature: 0.1,
-          }
-        });
+      let attempts = 0;
+      while (attempts < 2) {
+        attempts++;
+        try {
+          const result = await geminiAI.models.generateContent({
+            model: gModel,
+            contents: geminiPrompt,
+            config: {
+              responseMimeType: 'application/json',
+              temperature: 0.1,
+            }
+          });
 
-        const rawText = result.text?.trim();
-        if (rawText) {
-          const parsed = JSON.parse(rawText);
-          if (parsed.foundInKnowledgeBase === false || !parsed.answer) {
+          const rawText = result.text?.trim();
+          if (rawText) {
+            const parsed = JSON.parse(rawText);
+            if (parsed.foundInKnowledgeBase === false || !parsed.answer) {
+              return {
+                foundInKnowledgeBase: false,
+                answer: 'No supporting information was found in the available organizational documents.',
+                citations: [],
+                confidence: 0,
+                modelUsed: gModel,
+                provider: 'gemini',
+              };
+            }
+
+            const citedIndices: number[] = Array.isArray(parsed.citedChunkIndices) && parsed.citedChunkIndices.length > 0
+              ? parsed.citedChunkIndices
+              : topMatches.map((_, i) => i + 1);
+
+            const citations: SourceCitation[] = citedIndices
+              .map(idx => topMatches[idx - 1]?.chunk)
+              .filter(Boolean)
+              .map(c => ({
+                chunkId: c.id,
+                documentId: c.documentId,
+                documentTitle: c.documentTitle,
+                documentCode: c.documentCode,
+                versionNumber: c.versionNumber,
+                pageOrSheetRef: c.pageOrSheetRef,
+                excerpt: c.text.slice(0, 160) + '...',
+                relevanceScore: 0.98,
+                subsidiary: c.subsidiary,
+              }));
+
             return {
-              foundInKnowledgeBase: false,
-              answer: 'No supporting information was found in the available organizational documents.',
-              citations: [],
-              confidence: 0,
+              foundInKnowledgeBase: true,
+              answer: parsed.answer,
+              aiSummary: parsed.aiSummary || parsed.answer.slice(0, 120),
+              confidence: Math.min(100, Math.max(85, parsed.confidence || 95)),
+              citations,
+              draftOfficialReply: parsed.draftOfficialReply,
               modelUsed: gModel,
               provider: 'gemini',
             };
           }
-
-          const citedIndices: number[] = Array.isArray(parsed.citedChunkIndices) && parsed.citedChunkIndices.length > 0
-            ? parsed.citedChunkIndices
-            : topMatches.map((_, i) => i + 1);
-
-          const citations: SourceCitation[] = citedIndices
-            .map(idx => topMatches[idx - 1]?.chunk)
-            .filter(Boolean)
-            .map(c => ({
-              chunkId: c.id,
-              documentId: c.documentId,
-              documentTitle: c.documentTitle,
-              documentCode: c.documentCode,
-              versionNumber: c.versionNumber,
-              pageOrSheetRef: c.pageOrSheetRef,
-              excerpt: c.text.slice(0, 160) + '...',
-              relevanceScore: 0.98,
-              subsidiary: c.subsidiary,
-            }));
-
-          return {
-            foundInKnowledgeBase: true,
-            answer: parsed.answer,
-            aiSummary: parsed.aiSummary || parsed.answer.slice(0, 120),
-            confidence: Math.min(100, Math.max(85, parsed.confidence || 95)),
-            citations,
-            draftOfficialReply: parsed.draftOfficialReply,
-            modelUsed: gModel,
-            provider: 'gemini',
-          };
+          break;
+        } catch (geminiErr: any) {
+          const errMsg = geminiErr?.message || String(geminiErr);
+          const isTransient = errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('429') || errMsg.includes('ResourceExhausted');
+          if (isTransient && attempts < 2) {
+            await new Promise(r => setTimeout(r, 600));
+            continue;
+          }
+          break;
         }
-      } catch (geminiErr: any) {
-        console.warn(`[Gemini RAG] Model ${gModel} note:`, geminiErr?.message?.slice(0, 100) || geminiErr);
       }
     }
   }

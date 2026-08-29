@@ -175,100 +175,42 @@ export const AiInsights: React.FC = () => {
         </div>
       </div>
 
-      {/* Grid: Interactive Keyword Cluster Cloud & Topics Confidence List */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 relative z-0">
-        {/* Visual Topic Cloud: 5 Cols */}
-        <div className="lg:col-span-5 bg-white border border-[#E4E0D6] rounded-xl p-6 shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-[#EFEBE2] mb-4">
-              <h3 className="font-serif font-bold text-base text-[#141C2B]">
-                Topic Cluster Cloud
-              </h3>
-              <span className="text-[11px] text-[#64748B]">Click to filter catalog</span>
-            </div>
-
-            <div className="flex flex-wrap gap-2.5 items-center justify-center p-4 bg-[#FAF8F3] rounded-xl border border-[#E4E0D6] min-h-[220px]">
-              {topicInsights.map((t, idx) => {
-                const scaleClasses = [
-                  'text-base font-bold bg-[#141C2B] text-[#C8892E] px-3 py-1.5 shadow-xs',
-                  'text-sm font-bold bg-white text-[#141C2B] border border-[#C8892E] px-2.5 py-1',
-                  'text-xs font-semibold bg-[#EFEBE2] text-[#141C2B] px-2.5 py-1',
-                  'text-xs font-medium bg-white text-[#475569] border border-[#E4E0D6] px-2 py-0.5',
-                ];
-                const styleClass = scaleClasses[Math.min(idx, 3)];
-
-                return (
-                  <button
-                    key={t.topic}
-                    onClick={() => handleTopicClick(t.topic)}
-                    className={`rounded-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer ${styleClass}`}
-                    title={`${t.occurrences} references across approved records`}
-                  >
-                    <span>{t.topic}</span>
-                    <span className="text-[10px] opacity-70 ml-1.5 font-mono">({t.occurrences})</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-[#EFEBE2] flex items-center justify-between text-xs text-[#64748B]">
-            <span>Algorithm: TF-IDF + Embeddings</span>
-            <span className="font-mono text-[#141C2B]">100% Grounded</span>
-          </div>
+      {/* Interactive Keyword Cluster Cloud */}
+      <div className="bg-white border border-[#E4E0D6] rounded-xl p-6 shadow-xs relative z-0">
+        <div className="flex items-center justify-between pb-3 border-b border-[#EFEBE2] mb-4">
+          <h3 className="font-serif font-bold text-base text-[#141C2B]">
+            Topic Cluster Cloud
+          </h3>
+          <span className="text-[11px] text-[#64748B]">Click to filter catalog</span>
         </div>
 
-        {/* Topics Confidence List: 7 Cols */}
-        <div className="lg:col-span-7 bg-white border border-[#E4E0D6] rounded-xl p-6 shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-[#EFEBE2] mb-4">
-              <h3 className="font-serif font-bold text-base text-[#141C2B]">
-                High-Frequency Technical Topics
-              </h3>
-              <span className="text-[11px] font-mono text-[#64748B]">Extraction Confidence</span>
-            </div>
+        <div className="flex flex-wrap gap-2.5 items-center justify-center p-6 bg-[#FAF8F3] rounded-xl border border-[#E4E0D6] min-h-[180px]">
+          {topicInsights.map((t, idx) => {
+            const scaleClasses = [
+              'text-base font-bold bg-[#141C2B] text-[#C8892E] px-3 py-1.5 shadow-xs',
+              'text-sm font-bold bg-white text-[#141C2B] border border-[#C8892E] px-2.5 py-1',
+              'text-xs font-semibold bg-[#EFEBE2] text-[#141C2B] px-2.5 py-1',
+              'text-xs font-medium bg-white text-[#475569] border border-[#E4E0D6] px-2 py-0.5',
+            ];
+            const styleClass = scaleClasses[Math.min(idx, 3)];
 
-            <div className="space-y-3">
-              {topicInsights.map((t) => (
-                <div 
-                  key={t.topic}
-                  onClick={() => handleTopicClick(t.topic)}
-                  className="p-3 bg-[#FAF8F3] hover:bg-[#FDFBF7] border border-[#E4E0D6] hover:border-[#C8892E] rounded-lg cursor-pointer transition-all flex items-center justify-between gap-4 group"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between text-xs mb-1">
-                      <span className="font-bold text-[#141C2B] group-hover:text-[#C8892E] transition-colors truncate">
-                        {t.topic}
-                      </span>
-                      <span className="font-mono text-[11px] text-[#64748B]">
-                        {t.occurrences} references
-                      </span>
-                    </div>
+            return (
+              <button
+                key={t.topic}
+                onClick={() => handleTopicClick(t.topic)}
+                className={`rounded-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer ${styleClass}`}
+                title={`${t.occurrences} references across approved records`}
+              >
+                <span>{t.topic}</span>
+                <span className="text-[10px] opacity-70 ml-1.5 font-mono">({t.occurrences})</span>
+              </button>
+            );
+          })}
+        </div>
 
-                    {/* Progress Confidence Bar */}
-                    <div className="w-full h-2 bg-[#EFEBE2] rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-[#C8892E] rounded-full"
-                        style={{ width: `${t.confidence}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="text-[10px] font-mono font-bold bg-[#EFEBE2] text-[#141C2B] px-2 py-0.5 rounded">
-                      {t.confidence}% Conf
-                    </span>
-                    <ChevronRight className="w-4 h-4 text-[#94A3B8] group-hover:text-[#C8892E]" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-[#EFEBE2] flex items-center justify-between text-xs text-[#64748B]">
-            <span>Click any topic row to filter Knowledge Center</span>
-            <span className="text-[#C8892E] font-semibold">Live Ontology</span>
-          </div>
+        <div className="mt-4 pt-3 border-t border-[#EFEBE2] flex items-center justify-between text-xs text-[#64748B]">
+          <span>Algorithm: TF-IDF + Embeddings</span>
+          <span className="font-mono text-[#141C2B]">100% Grounded</span>
         </div>
       </div>
 
