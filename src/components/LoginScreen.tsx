@@ -37,7 +37,6 @@ export const LoginScreen: React.FC = () => {
   const [loginIdentifier, setLoginIdentifier] = useState<string>('');
   const [loginPassword, setLoginPassword] = useState<string>('');
   const [showLoginPassword, setShowLoginPassword] = useState<boolean>(false);
-  const [rememberMe, setRememberMe] = useState<boolean>(true);
   const [loginError, setLoginError] = useState<{ message: string; status?: 'pending' | 'rejected' } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [showDemoAccounts, setShowDemoAccounts] = useState<boolean>(false);
@@ -105,7 +104,7 @@ export const LoginScreen: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      const res = await loginWithCredentials(loginIdentifier, loginPassword, rememberMe);
+      const res = await loginWithCredentials(loginIdentifier, loginPassword);
       setIsSubmitting(false);
 
       if (!res.success) {
@@ -272,10 +271,13 @@ export const LoginScreen: React.FC = () => {
 
     try {
       setIsSubmitting(true);
+      const redirectTo = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)
+        ? `http://localhost:${window.location.port || '3000'}`
+        : window.location.origin;
       const { error } = await client.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+          redirectTo,
         },
       });
 
@@ -487,20 +489,6 @@ export const LoginScreen: React.FC = () => {
                       {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                </div>
-
-                {/* Remember Me */}
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs text-[#475569] select-none">
-                    <input
-                      type="checkbox"
-                      id="checkbox-remember-me"
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-300 text-[#141C2B] focus:ring-[#C8892E] cursor-pointer"
-                    />
-                    <span>Remember me</span>
-                  </label>
                 </div>
 
                 {/* Primary Button: Sign In → */}

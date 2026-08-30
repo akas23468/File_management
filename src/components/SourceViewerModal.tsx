@@ -1,5 +1,6 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
+import { getStorageSignedUrl } from '../services/supabaseDataService';
 import { 
   X, 
   BookOpen, 
@@ -13,8 +14,9 @@ import {
 } from 'lucide-react';
 
 export const SourceViewerModal: React.FC = () => {
-  const { activeCitationForModal, setActiveCitationForModal, documents } = useApp();
+  const { activeCitationForModal, setActiveCitationForModal, documents, setToastMessage } = useApp();
   const [copied, setCopied] = React.useState<boolean>(false);
+  const [isOpeningSource, setIsOpeningSource] = React.useState<boolean>(false);
 
   if (!activeCitationForModal) return null;
 
@@ -25,6 +27,25 @@ export const SourceViewerModal: React.FC = () => {
     navigator.clipboard.writeText(activeCitationForModal.excerpt);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleOpenSource = async () => {
+    if (!targetVer?.storageFilePath) {
+      setToastMessage({ type: 'info', text: 'This archived record has no uploaded source file to open.' });
+      return;
+    }
+
+    setIsOpeningSource(true);
+    try {
+      const signedUrl = await getStorageSignedUrl(targetVer.storageFilePath, 3600, targetVer.storageBucket);
+      if (signedUrl) {
+        window.open(signedUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        setToastMessage({ type: 'warning', text: 'The source file could not be opened. Check its Supabase Storage access policy.' });
+      }
+    } finally {
+      setIsOpeningSource(false);
+    }
   };
 
   return (
@@ -122,12 +143,22 @@ export const SourceViewerModal: React.FC = () => {
           <span className="text-[11px] font-mono text-[#64748B]">
             Verified against CMPDI Approved Repository Ledger
           </span>
-          <button
-            onClick={() => setActiveCitationForModal(null)}
-            className="w-full sm:w-auto px-5 py-2.5 bg-[#141C2B] text-white text-xs font-bold rounded-lg hover:bg-[#1E293B] cursor-pointer text-center"
-          >
-            Close Viewer
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleOpenSource}
+              disabled={isOpeningSource}
+              className="px-4 py-2.5 bg-[#FAF8F3] text-[#141C2B] border border-[#E4E0D6] text-xs font-bold rounded-lg hover:bg-[#EFEBE2] disabled:opacity-60 cursor-pointer text-center inline-flex items-center justify-center gap-1.5"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-[#C8892E]" />
+              <span>{isOpeningSource ? 'Opening...' : 'Open Source File'}</span>
+            </button>
+            <button
+              onClick={() => setActiveCitationForModal(null)}
+              className="px-5 py-2.5 bg-[#141C2B] text-white text-xs font-bold rounded-lg hover:bg-[#1E293B] cursor-pointer text-center"
+            >
+              Close Viewer
+            </button>
+          </div>
         </div>
       </div>
     </div>

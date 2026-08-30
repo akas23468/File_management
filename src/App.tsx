@@ -54,7 +54,7 @@ const MainLayout: React.FC = () => {
       }
 
       // Check auth type: demo/intranet accounts do not require Supabase GoTrue tokens
-      const authType = localStorage.getItem('khanij_auth_type');
+      const authType = sessionStorage.getItem('khanij_auth_type');
       if (authType === 'local' || currentUser?.email?.includes('@cmpdi.co.in') || currentUser?.email?.includes('@secl.gov.in') || currentUser?.id?.startsWith('usr_')) {
         if (isMounted) setIsVerifyingSession(false);
         return;

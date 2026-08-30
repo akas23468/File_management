@@ -41,20 +41,17 @@ export const MyUpdates: React.FC = () => {
     }
   };
 
-  // Extract all versions submitted by this employee / subsidiary (or all if admin)
+  // My Updates is an employee-owned submission history, regardless of role or subsidiary.
   const submissions: { doc: any; version: any }[] = [];
   (documents || []).forEach(doc => {
     if (!doc || !Array.isArray(doc.versions)) return;
     doc.versions.forEach(v => {
       if (!v || !v.uploadedBy) return;
-      const isMySub = 
-        currentUser.role === 'admin' ||
+      const isMySubmission =
         v.uploadedBy.id === currentUser.id ||
-        (v.uploadedBy.employeeId && currentUser.employeeId && v.uploadedBy.employeeId === currentUser.employeeId) ||
-        (v.uploadedBy.name && currentUser.name && v.uploadedBy.name.toLowerCase() === currentUser.name.toLowerCase()) ||
-        v.uploadedBy.subsidiary === currentUser.subsidiary;
+        (!v.uploadedBy.id && Boolean(v.uploadedBy.employeeId) && v.uploadedBy.employeeId === currentUser.employeeId);
 
-      if (isMySub) {
+      if (isMySubmission) {
         submissions.push({ doc, version: v });
       }
     });

@@ -32,6 +32,7 @@ import {
   SEED_ACCESS_REQUESTS
 } from '../data/seedData';
 import { syncDocumentsToServiceWorkerCache } from '../utils/serviceWorkerRegistration';
+import { createDocumentChunks } from '../utils/documentChunking';
 import { getSupabase, isSupabaseConfigured } from '../supabaseClient';
 import { 
   fetchUserProfile, 
@@ -39,8 +40,8 @@ import {
   fetchAllDocuments, 
   fetchDocumentChunks, 
   fetchAuditLogsFromSupabase,
-  persistNewDocument,
-  persistNewVersion,
+  persistQueryHistory,
+  persistReport,
   deleteDocumentFromSupabase,
   persistApprovalReview,
   persistAuditLog
@@ -72,7 +73,7 @@ interface AppContextType {
   switchRole: (role: Role) => void;
   allUsers: User[];
   accessRequests: UserAccessRequest[];
-  loginWithCredentials: (identifier: string, password?: string, rememberMe?: boolean) => Promise<{
+  loginWithCredentials: (identifier: string, password?: string) => Promise<{
     success: boolean;
     status?: AccountStatus;
     message?: string;
@@ -102,8 +103,8 @@ interface AppContextType {
   // Documents & Versions
   documents: Document[];
   chunks: Chunk[];
-  addDocument: (doc: Document) => Promise<void>;
-  submitNewVersion: (docId: string, version: DocumentVersion) => Promise<void>;
+  addDocument: (doc: Document, precomputedChunks?: Chunk[]) => Promise<boolean>;
+  submitNewVersion: (docId: string, version: DocumentVersion, precomputedChunks?: Chunk[]) => Promise<boolean>;
   updateDocumentVersionFileUrl: (docId: string, versionId: string, fileUrl: string, fileName?: string, extractedText?: string) => void;
   deleteDocument: (docId: string) => Promise<void>;
   approveVersion: (docId: string, versionId: string, note?: string) => Promise<void>;
@@ -153,6 +154,19 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const saveSession = (user: User, authType: 'local' | 'supabase') => {
+    sessionStorage.setItem('khanij_auth_type', authType);
+    sessionStorage.setItem('khanij_user', JSON.stringify(user));
+    sessionStorage.setItem('khanij_logged_in', 'true');
+  };
+
+  const clearPersistentSession = () => {
+    localStorage.removeItem('khanij_logged_in');
+    localStorage.removeItem('khanij_user');
+    localStorage.removeItem('khanij_auth_type');
+    localStorage.removeItem('khanij_remember_me');
+  };
+
   const [allUsers, setAllUsers] = useState<User[]>(() => {
     try {
       const saved = localStorage.getItem('khanij_registered_users');
@@ -187,24 +201,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [currentUser, setCurrentUser] = useState<User>(() => {
     try {
-      const isPersistent = typeof window !== 'undefined' && localStorage.getItem('khanij_remember_me') === 'true';
-      const saved = isPersistent 
-        ? localStorage.getItem('khanij_user') 
-        : (typeof window !== 'undefined' ? sessionStorage.getItem('khanij_user') : null);
+      const saved = typeof window !== 'undefined' ? sessionStorage.getItem('khanij_user') : null;
       return saved ? JSON.parse(saved) : SEED_USERS[0];
     } catch {
       return SEED_USERS[0];
     }
   });
 
-  // Strict requirement: Default to unauthenticated unless explicitly remembered
+  // Authentication ends with the browser session and is never persisted locally.
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
     try {
       if (typeof window === 'undefined') return false;
-      const isPersistent = localStorage.getItem('khanij_remember_me') === 'true';
-      if (isPersistent) {
-        return localStorage.getItem('khanij_logged_in') === 'true';
-      }
       return sessionStorage.getItem('khanij_logged_in') === 'true';
     } catch {
       return false;
@@ -214,10 +221,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeView, setActiveView] = useState<AppView>(() => {
     try {
       if (typeof window === 'undefined') return 'login';
-      const isPersistent = localStorage.getItem('khanij_remember_me') === 'true';
-      const isLogged = isPersistent 
-        ? localStorage.getItem('khanij_logged_in') === 'true' 
-        : sessionStorage.getItem('khanij_logged_in') === 'true';
+      const isLogged = sessionStorage.getItem('khanij_logged_in') === 'true';
       return isLogged ? 'dashboard' : 'login';
     } catch {
       return 'login';
@@ -305,6 +309,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [reportDraftFromAi, setReportDraftFromAi] = useState<{ text: string; citations: SourceCitation[] } | null>(null);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'info' | 'warning'; text: string } | null>(null);
 
+  useEffect(() => {
+    try {
+      clearPersistentSession();
+    } catch (error) {
+      console.warn('Persistent session cleanup notice:', error);
+    }
+  }, []);
+
   // Keep local storage in sync whenever documents state changes
   useEffect(() => {
     try {
@@ -362,16 +374,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
             const rVersionIds = new Set(rDoc.versions.map(v => v.id));
             const pendingLocalVersions = localDoc.versions.filter(lv => !rVersionIds.has(lv.id));
+            const mergedVersions = rDoc.versions.map(remoteVersion => {
+              const localVersion = localDoc.versions.find(version => version.id === remoteVersion.id);
+              const hasLocalReview = localVersion?.reviewedAt && localVersion.approvalStatus !== 'pending';
+              const remoteIsStillPending = remoteVersion.approvalStatus === 'pending';
+
+              return hasLocalReview && remoteIsStillPending ? localVersion : remoteVersion;
+            });
 
             if (pendingLocalVersions.length > 0) {
-              const combinedVersions = [...pendingLocalVersions, ...rDoc.versions];
+              const combinedVersions = [...pendingLocalVersions, ...mergedVersions];
               return {
                 ...rDoc,
                 versions: combinedVersions,
                 status: combinedVersions.some(v => v.approvalStatus === 'pending') ? 'pending' : rDoc.status,
               };
             }
-            return rDoc;
+
+            const latestLocalReview = localDoc.versions
+              .filter(version => version.reviewedAt && version.approvalStatus !== 'pending')
+              .sort((firstVersion, secondVersion) => new Date(secondVersion.reviewedAt || 0).getTime() - new Date(firstVersion.reviewedAt || 0).getTime())[0];
+
+            return {
+              ...rDoc,
+              versions: mergedVersions,
+              status: latestLocalReview?.approvalStatus === 'approved' && mergedVersions.some(version => version.id === latestLocalReview.id)
+                ? 'approved'
+                : rDoc.status,
+              currentVersionId: latestLocalReview?.approvalStatus === 'approved'
+                ? latestLocalReview.id
+                : rDoc.currentVersionId,
+            };
           });
 
           const mergedAll = [...localOnlyDocs, ...mergedRemoteDocs];
@@ -386,11 +419,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setChunks(prev => {
           const remoteChunkIds = new Set(remoteChunks.map(c => c.id));
           const localOnlyChunks = prev.filter(c => !remoteChunkIds.has(c.id));
-          const mergedChunks = [...localOnlyChunks, ...remoteChunks];
+          const mergedChunks = remoteChunks.map(remoteChunk => {
+            const localChunk = prev.find(chunk => chunk.id === remoteChunk.id);
+            return localChunk?.isApproved && !remoteChunk.isApproved ? localChunk : remoteChunk;
+          });
+          const allChunks = [...localOnlyChunks, ...mergedChunks];
           try {
-            localStorage.setItem('khanij_chunks', JSON.stringify(mergedChunks));
+            localStorage.setItem('khanij_chunks', JSON.stringify(allChunks));
           } catch (e) {}
-          return mergedChunks;
+          return allChunks;
         });
       }
       if (remoteAudit !== null && remoteAudit.length > 0) {
@@ -414,6 +451,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!client) return;
 
     const handleSessionUser = async (sessionUser: any) => {
+      const savedAuthType = sessionStorage.getItem('khanij_auth_type');
+      const savedUserJson = sessionStorage.getItem('khanij_user');
+      if (savedUserJson) {
+        try {
+          const savedUser: User = JSON.parse(savedUserJson);
+          if (savedAuthType === 'local' || savedUser.id !== sessionUser.id) {
+            return;
+          }
+        } catch {
+          // A malformed tab session can be safely re-established from Supabase.
+        }
+      }
+
       try {
         const userEmail = (sessionUser.email || '').toLowerCase().trim();
         const profile = await fetchUserProfile(sessionUser.id, userEmail);
@@ -454,9 +504,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveView('dashboard');
 
         try {
-          localStorage.setItem('khanij_auth_type', 'supabase');
-          localStorage.setItem('khanij_logged_in', 'true');
-          localStorage.setItem('khanij_user', JSON.stringify(userToSet));
+          clearPersistentSession();
+          saveSession(userToSet, 'supabase');
         } catch (storageErr) {
           console.warn('Storage write notice:', storageErr);
         }
@@ -487,19 +536,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const { data: { subscription } } = client.auth.onAuthStateChange(async (event, session) => {
       if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
         await handleSessionUser(session.user);
-      } else if (event === 'SIGNED_OUT') {
-        setIsLoggedIn(false);
-        setActiveView('login');
-        try {
-          localStorage.removeItem('khanij_logged_in');
-          localStorage.removeItem('khanij_user');
-          localStorage.removeItem('khanij_auth_type');
-          localStorage.removeItem('khanij_remember_me');
-          sessionStorage.removeItem('khanij_logged_in');
-          sessionStorage.removeItem('khanij_user');
-        } catch (e) {
-          console.warn('Session clear notice:', e);
-        }
       }
     });
 
@@ -640,8 +676,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Real Supabase Authentication & Built-in Demo Account handler
   const loginWithCredentials = async (
     identifier: string, 
-    password?: string, 
-    rememberMe: boolean = true
+    password?: string
   ): Promise<{
     success: boolean;
     status?: AccountStatus;
@@ -700,17 +735,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               }
               setCurrentUser(profile);
               setIsLoggedIn(true);
-              localStorage.setItem('khanij_auth_type', 'supabase');
-              if (rememberMe) {
-                localStorage.setItem('khanij_remember_me', 'true');
-                localStorage.setItem('khanij_user', JSON.stringify(profile));
-                localStorage.setItem('khanij_logged_in', 'true');
-              } else {
-                localStorage.removeItem('khanij_remember_me');
-                localStorage.removeItem('khanij_logged_in');
-                sessionStorage.setItem('khanij_user', JSON.stringify(profile));
-                sessionStorage.setItem('khanij_logged_in', 'true');
-              }
+              clearPersistentSession();
+              saveSession(profile, 'supabase');
               setActiveView('dashboard');
               logAuditAction('AI_QUERY', `Supabase Authenticated: ${profile.name} (${profile.role})`);
               setToastMessage({ type: 'success', text: `Welcome, ${profile.name} (${profile.subsidiary})` });
@@ -726,17 +752,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCurrentUser(foundDemoOrLocal);
       setIsLoggedIn(true);
       try {
-        localStorage.setItem('khanij_auth_type', 'local');
-        if (rememberMe) {
-          localStorage.setItem('khanij_remember_me', 'true');
-          localStorage.setItem('khanij_user', JSON.stringify(foundDemoOrLocal));
-          localStorage.setItem('khanij_logged_in', 'true');
-        } else {
-          localStorage.removeItem('khanij_remember_me');
-          localStorage.removeItem('khanij_logged_in');
-          sessionStorage.setItem('khanij_user', JSON.stringify(foundDemoOrLocal));
-          sessionStorage.setItem('khanij_logged_in', 'true');
-        }
+        clearPersistentSession();
+        saveSession(foundDemoOrLocal, 'local');
       } catch (e) {
         console.warn('Storage write notice:', e);
       }
@@ -765,8 +782,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (error) {
             console.warn('[Supabase Auth] signInWithPassword error, activating seamless fallback session:', error.message);
             // Seamless fallback to user session
-            const isTargetAdmin = cleanEmail.includes('vedant') || cleanEmail.includes('priya') || cleanEmail.includes('admin') || cleanEmail.includes('cmpdi.co.in') || (foundDemoOrLocal && foundDemoOrLocal.role === 'admin');
-            const fallbackUser: User = foundDemoOrLocal || {
+            const isTargetAdmin = cleanEmail.includes('vedant') || cleanEmail.includes('priya') || cleanEmail.includes('admin') || cleanEmail.includes('cmpdi.co.in');
+            const fallbackUser: User = {
               id: `usr_${Date.now()}`,
               name: cleanEmail.includes('vedant') 
                 ? 'Vedant Dike' 
@@ -785,17 +802,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
             setCurrentUser(fallbackUser);
             setIsLoggedIn(true);
-            localStorage.setItem('khanij_auth_type', 'local');
-            if (rememberMe) {
-              localStorage.setItem('khanij_remember_me', 'true');
-              localStorage.setItem('khanij_user', JSON.stringify(fallbackUser));
-              localStorage.setItem('khanij_logged_in', 'true');
-            } else {
-              localStorage.removeItem('khanij_remember_me');
-              localStorage.removeItem('khanij_logged_in');
-              sessionStorage.setItem('khanij_user', JSON.stringify(fallbackUser));
-              sessionStorage.setItem('khanij_logged_in', 'true');
-            }
+            clearPersistentSession();
+            saveSession(fallbackUser, 'local');
             setActiveView('dashboard');
             logAuditAction('AI_QUERY', `Authenticated to ${fallbackUser.role === 'admin' ? 'Admin & Governance' : 'Employee Workstation'} Portal (${fallbackUser.name})`);
             setToastMessage({ type: 'success', text: `Welcome, ${fallbackUser.name} (${fallbackUser.subsidiary})` });
@@ -812,18 +820,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
           if (data?.user && data?.session) {
             let profile = await fetchUserProfile(data.user.id, data.user.email || cleanEmail);
-            const isTargetAdmin = cleanEmail === 'priyadike23@gmail.com' || (foundDemoOrLocal && foundDemoOrLocal.role === 'admin');
+            const isTargetAdmin = cleanEmail === 'priyadike23@gmail.com';
             if (!profile) {
               const meta = data.user.user_metadata || {};
               profile = {
                 id: data.user.id,
-                name: meta.name || data.user.email?.split('@')[0] || foundDemoOrLocal?.name || 'Authorized User',
+                name: meta.name || data.user.email?.split('@')[0] || 'Authorized User',
                 email: data.user.email || cleanEmail,
-                role: isTargetAdmin ? 'admin' : ((meta.role as Role) || foundDemoOrLocal?.role || 'employee'),
-                subsidiary: (meta.subsidiary as Subsidiary) || foundDemoOrLocal?.subsidiary || 'CMPDI HQ',
-                department: meta.department || foundDemoOrLocal?.department || 'Central Directorate',
-                designation: isTargetAdmin ? 'Chief Mining Engineer' : (meta.designation || foundDemoOrLocal?.designation || 'Mining Technical Officer'),
-                employeeId: meta.employeeId || foundDemoOrLocal?.employeeId || cleanId,
+                role: isTargetAdmin ? 'admin' : ((meta.role as Role) || 'employee'),
+                subsidiary: (meta.subsidiary as Subsidiary) || 'CMPDI HQ',
+                department: meta.department || 'Central Directorate',
+                designation: isTargetAdmin ? 'Chief Mining Engineer' : (meta.designation || 'Mining Technical Officer'),
+                employeeId: meta.employeeId || cleanId,
                 status: 'approved',
               };
               await syncUserProfile(profile);
@@ -834,18 +842,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
             setCurrentUser(profile);
             setIsLoggedIn(true);
-            localStorage.setItem('khanij_auth_type', 'supabase');
-
-            if (rememberMe) {
-              localStorage.setItem('khanij_remember_me', 'true');
-              localStorage.setItem('khanij_user', JSON.stringify(profile));
-              localStorage.setItem('khanij_logged_in', 'true');
-            } else {
-              localStorage.removeItem('khanij_remember_me');
-              localStorage.removeItem('khanij_logged_in');
-              sessionStorage.setItem('khanij_user', JSON.stringify(profile));
-              sessionStorage.setItem('khanij_logged_in', 'true');
-            }
+            clearPersistentSession();
+            saveSession(profile, 'supabase');
 
             setActiveView('dashboard');
             logAuditAction('AI_QUERY', `Supabase Authenticated: ${profile.name} (${profile.role})`);
@@ -879,30 +877,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         status: 'rejected',
         message: foundReq.rejectedReason || 'Your access request was not approved.'
       };
-    }
-
-    if (foundDemoOrLocal) {
-      setCurrentUser(foundDemoOrLocal);
-      setIsLoggedIn(true);
-      try {
-        localStorage.setItem('khanij_auth_type', 'local');
-        if (rememberMe) {
-          localStorage.setItem('khanij_remember_me', 'true');
-          localStorage.setItem('khanij_user', JSON.stringify(foundDemoOrLocal));
-          localStorage.setItem('khanij_logged_in', 'true');
-        } else {
-          localStorage.removeItem('khanij_remember_me');
-          localStorage.removeItem('khanij_logged_in');
-          sessionStorage.setItem('khanij_user', JSON.stringify(foundDemoOrLocal));
-          sessionStorage.setItem('khanij_logged_in', 'true');
-        }
-      } catch (e) {
-        console.warn('Storage notice:', e);
-      }
-      setActiveView('dashboard');
-      logAuditAction('AI_QUERY', `User authenticated to ${foundDemoOrLocal.role === 'admin' ? 'Admin & Governance' : 'Employee Workstation'} Portal (${foundDemoOrLocal.name})`);
-      setToastMessage({ type: 'success', text: `Welcome, ${foundDemoOrLocal.name} (${foundDemoOrLocal.subsidiary})` });
-      return { success: true, status: 'approved', user: foundDemoOrLocal };
     }
 
     // 4. Instant Auto-Resolution for any entered email or identifier
@@ -939,17 +913,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentUser(autoUser);
     setIsLoggedIn(true);
     try {
-      localStorage.setItem('khanij_auth_type', 'local');
-      if (rememberMe) {
-        localStorage.setItem('khanij_remember_me', 'true');
-        localStorage.setItem('khanij_user', JSON.stringify(autoUser));
-        localStorage.setItem('khanij_logged_in', 'true');
-      } else {
-        localStorage.removeItem('khanij_remember_me');
-        localStorage.removeItem('khanij_logged_in');
-        sessionStorage.setItem('khanij_user', JSON.stringify(autoUser));
-        sessionStorage.setItem('khanij_logged_in', 'true');
-      }
+      clearPersistentSession();
+      saveSession(autoUser, 'local');
     } catch (e) {
       console.warn('Storage notice:', e);
     }
@@ -1142,8 +1107,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentUser(user);
     setIsLoggedIn(true);
     try {
-      localStorage.setItem('khanij_user', JSON.stringify(user));
-      localStorage.setItem('khanij_logged_in', 'true');
+      clearPersistentSession();
+      saveSession(user, 'local');
     } catch (e) {
       console.warn('Session save error:', e);
     }
@@ -1167,12 +1132,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setIsLoggedIn(false);
     try {
-      localStorage.removeItem('khanij_logged_in');
-      localStorage.removeItem('khanij_user');
-      localStorage.removeItem('khanij_remember_me');
-      localStorage.removeItem('khanij_auth_type');
+      clearPersistentSession();
       sessionStorage.removeItem('khanij_logged_in');
       sessionStorage.removeItem('khanij_user');
+      sessionStorage.removeItem('khanij_auth_type');
     } catch (e) {
       console.warn('Session clear error:', e);
     }
@@ -1190,8 +1153,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setCurrentUser(matchingUser);
     try {
-      localStorage.setItem('khanij_user', JSON.stringify(matchingUser));
-      localStorage.setItem('khanij_logged_in', 'true');
+      clearPersistentSession();
+      saveSession(matchingUser, 'local');
     } catch (e) {
       console.warn('Session save error:', e);
     }
@@ -1202,24 +1165,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const addDocument = async (doc: Document) => {
+  const addDocument = async (doc: Document, precomputedChunks?: Chunk[]) => {
+    const newChunks: Chunk[] = precomputedChunks ?? (doc.versions[0] ? createDocumentChunks(doc, doc.versions[0]) : []);
+
     setDocuments(prev => [doc, ...prev]);
     setCachedDocumentIds(prev => [doc.id, ...prev]);
-
-    // Create chunks
-    const newChunks: Chunk[] = doc.versions[0] ? [{
-      id: `chk_${Date.now()}`,
-      documentId: doc.id,
-      documentTitle: doc.title,
-      documentCode: doc.documentCode,
-      documentVersionId: doc.versions[0].id,
-      versionNumber: doc.versions[0].versionNumber,
-      subsidiary: doc.subsidiary,
-      pageOrSheetRef: 'Page 1',
-      topicTag: doc.tags[0] || 'Technical Filing',
-      isApproved: doc.versions[0].approvalStatus === 'approved',
-      text: doc.versions[0].extractedText,
-    }] : [];
 
     if (newChunks.length > 0) {
       setChunks(prev => [...newChunks, ...prev]);
@@ -1228,13 +1178,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     logAuditAction('UPLOAD_DOCUMENT', `Uploaded new document: ${doc.title} (${doc.documentCode})`, doc.id, doc.title, 1);
     setToastMessage({ type: 'success', text: `Document submitted for approval: ${doc.title}` });
 
-    if (isSupabaseConfigured && !isUndergroundModeActive) {
-      await persistNewDocument(doc, newChunks);
-    }
+    return true;
   };
 
-  const submitNewVersion = async (docId: string, version: DocumentVersion) => {
+  const submitNewVersion = async (docId: string, version: DocumentVersion, precomputedChunks?: Chunk[]) => {
     const targetDoc = documents.find(d => d.id === docId);
+    const newChunks: Chunk[] = precomputedChunks ?? (targetDoc ? createDocumentChunks(targetDoc, version, false) : []);
+
     setDocuments(prev => prev.map(doc => {
       if (doc.id === docId) {
         return {
@@ -1246,20 +1196,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return doc;
     }));
 
-    const newChunks: Chunk[] = targetDoc ? [{
-      id: `chk_${Date.now()}`,
-      documentId: docId,
-      documentTitle: targetDoc.title,
-      documentCode: targetDoc.documentCode,
-      documentVersionId: version.id,
-      versionNumber: version.versionNumber,
-      subsidiary: targetDoc.subsidiary,
-      pageOrSheetRef: `Page 1 (v${version.versionNumber})`,
-      topicTag: targetDoc.tags[0] || 'Technical Filing',
-      isApproved: false,
-      text: version.extractedText,
-    }] : [];
-
     if (newChunks.length > 0) {
       setChunks(prev => [...newChunks, ...prev]);
     }
@@ -1267,9 +1203,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     logAuditAction('SUBMIT_VERSION', `Submitted revision v${version.versionNumber}: ${version.reasonForChange}`, docId, targetDoc?.title, version.versionNumber);
     setToastMessage({ type: 'info', text: `Version ${version.versionNumber} submitted. Placed in Approval Queue.` });
 
-    if (isSupabaseConfigured && !isUndergroundModeActive) {
-      await persistNewVersion(docId, version, newChunks);
-    }
+    return true;
   };
 
   const updateDocumentVersionFileUrl = (
@@ -1337,7 +1271,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let updatedDocTitle = '';
     let updatedVersionNum = 1;
     let submitterName = '';
-    let newChunksCreated: Chunk[] = [];
 
     setDocuments(prev => prev.map(doc => {
       if (doc.id === docId) {
@@ -1359,23 +1292,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return v;
         });
 
-        const targetVersion = updatedVersions.find(v => v.id === versionId);
-        if (targetVersion) {
-          newChunksCreated.push({
-            id: `chk_${Date.now()}`,
-            documentId: doc.id,
-            documentTitle: doc.title,
-            documentCode: doc.documentCode,
-            documentVersionId: targetVersion.id,
-            versionNumber: targetVersion.versionNumber,
-            subsidiary: doc.subsidiary,
-            pageOrSheetRef: `Page 1 (Approved v${targetVersion.versionNumber})`,
-            topicTag: doc.tags[0] || 'Technical Filing',
-            isApproved: true,
-            text: targetVersion.extractedText,
-          });
-        }
-
         return {
           ...doc,
           currentVersionId: versionId,
@@ -1387,9 +1303,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return doc;
     }));
 
-    if (newChunksCreated.length > 0) {
-      setChunks(prev => [...newChunksCreated, ...prev]);
-    }
+    // Mark the REAL chunks belonging to this version as approved in local state too.
+    // (Previously this fabricated a brand-new fake chunk with a client-side id that
+    // never existed in Supabase, so the actual document_chunks row stayed
+    // is_approved = false forever and reverted after logout/reload.)
+    setChunks(prev => prev.map(c =>
+      c.documentVersionId === versionId ? { ...c, isApproved: true } : c
+    ));
 
     setQueries(prev => prev.map(q => {
       const referencesDoc = q.citations.some(c => c.documentId === docId && c.versionNumber < updatedVersionNum);
@@ -1417,7 +1337,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     if (isSupabaseConfigured && !isUndergroundModeActive) {
-      await persistApprovalReview(versionId, 'approved', currentUser, note);
+      const saved = await persistApprovalReview(versionId, 'approved', currentUser, note);
+      if (!saved) {
+        setToastMessage({
+          type: 'warning',
+          text: 'Approval was applied locally but could not be saved to Supabase. Please retry.',
+        });
+      } else {
+        await reloadFromSupabase();
+      }
     }
   };
 
@@ -1451,11 +1379,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return doc;
     }));
 
+    setChunks(prev => prev.map(c =>
+      c.documentVersionId === versionId ? { ...c, isApproved: false } : c
+    ));
+
     logAuditAction('REJECT_VERSION', `Rejected v${versionNum} (Submitted by ${submitterName || 'Officer'}). Reviewed by ${currentUser.name}. Reason: ${reason}`, docId, docTitle, versionNum);
     setToastMessage({ type: 'warning', text: `Version v${versionNum} rejected with feedback.` });
 
     if (isSupabaseConfigured && !isUndergroundModeActive) {
-      await persistApprovalReview(versionId, 'rejected', currentUser, reason);
+      const saved = await persistApprovalReview(versionId, 'rejected', currentUser, reason);
+      if (!saved) {
+        setToastMessage({ type: 'warning', text: 'Rejection was applied locally but could not be saved to Supabase. Please retry.' });
+      } else {
+        await reloadFromSupabase();
+      }
     }
   };
 
@@ -1489,11 +1426,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return doc;
     }));
 
+    setChunks(prev => prev.map(c =>
+      c.documentVersionId === versionId ? { ...c, isApproved: false } : c
+    ));
+
     logAuditAction('REQUEST_CHANGES', `Requested changes on v${versionNum} (Submitted by ${submitterName || 'Officer'}). Reviewed by ${currentUser.name}. Note: ${note}`, docId, docTitle, versionNum);
     setToastMessage({ type: 'info', text: `Changes requested on v${versionNum}. Employee notified.` });
 
     if (isSupabaseConfigured && !isUndergroundModeActive) {
-      await persistApprovalReview(versionId, 'changes_requested', currentUser, note);
+      const saved = await persistApprovalReview(versionId, 'changes_requested', currentUser, note);
+      if (!saved) {
+        setToastMessage({ type: 'warning', text: 'Changes requested locally but could not be saved to Supabase. Please retry.' });
+      } else {
+        await reloadFromSupabase();
+      }
     }
   };
 
@@ -1533,10 +1479,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newQuery: QueryRecord = {
       ...queryData,
       id: `qry_${Date.now()}`,
+      userId: currentUser.id,
+      userName: currentUser.name,
+      userRole: currentUser.role,
       createdAt: new Date().toISOString(),
       viewCount: 1,
     };
     setQueries(prev => [newQuery, ...prev]);
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      persistQueryHistory(newQuery);
+    }
     logAuditAction('AI_QUERY', `AI Question asked: "${newQuery.questionText.slice(0, 60)}..." (Found: ${newQuery.foundInKnowledgeBase}, Confidence: ${newQuery.confidence.toFixed(1)}%)`);
     return newQuery;
   };
@@ -1548,6 +1500,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     setReports(prev => [newReport, ...prev]);
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      persistReport(newReport);
+    }
     logAuditAction('GENERATE_REPORT', `Generated ${newReport.title} for ${newReport.subsidiary}`);
     setToastMessage({ type: 'success', text: `Report successfully compiled: ${newReport.reportCode}` });
     return newReport;

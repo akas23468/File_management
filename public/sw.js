@@ -1,6 +1,6 @@
 // Khanij Service Worker - Offline Caching for Low-Connectivity Underground Mining Environments
-const CACHE_NAME = 'khanij-mining-v1';
-const DATA_CACHE_NAME = 'khanij-data-v1';
+const CACHE_NAME = 'khanij-mining-v2';
+const DATA_CACHE_NAME = 'khanij-data-v2';
 
 const STATIC_ASSETS = [
   '/',

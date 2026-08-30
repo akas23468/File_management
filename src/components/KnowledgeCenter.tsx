@@ -2,11 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Document, DocumentVersion, DocumentType, Subsidiary, ApprovalStatus } from '../types';
 import { 
-  uploadFileToStorage, 
   getStorageSignedUrl, 
+  persistDocumentUpload,
   STORAGE_BUCKET 
 } from '../services/supabaseDataService';
 import { extractTextFromPdf } from '../utils/pdfExtractor';
+import { createDocumentChunks } from '../utils/documentChunking';
+import { isSupabaseConfigured } from '../supabaseClient';
 import { 
   Search, 
   Filter, 
@@ -100,6 +102,7 @@ export const KnowledgeCenter: React.FC = () => {
   // OCR Processing Simulation Stages: 1. Uploaded -> 2. OCR -> 3. Table Extraction -> 4. Cleaning -> 5. Indexed
   const [ocrStep, setOcrStep] = useState<number>(0);
   const [isProcessingOcr, setIsProcessingOcr] = useState<boolean>(false);
+  const [isSavingUpload, setIsSavingUpload] = useState<boolean>(false);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [isAnalyzingAiSummary, setIsAnalyzingAiSummary] = useState<boolean>(false);
   const [aiSummaryProvider, setAiSummaryProvider] = useState<string | null>(null);
@@ -143,6 +146,10 @@ export const KnowledgeCenter: React.FC = () => {
       if (!matchTopic) return false;
     }
     return true;
+  }).sort((firstDocument, secondDocument) => {
+    const firstDate = new Date(firstDocument.lastUpdated || firstDocument.createdAt || 0).getTime();
+    const secondDate = new Date(secondDocument.lastUpdated || secondDocument.createdAt || 0).getTime();
+    return secondDate - firstDate;
   });
 
   const generateFileSpecificSummary = (
@@ -297,6 +304,7 @@ export const KnowledgeCenter: React.FC = () => {
     setShowExtractedTextPreview(false);
     setOcrStep(0);
     setIsProcessingOcr(false);
+    setIsSavingUpload(false);
     setDuplicateWarning(null);
     setIsUploadModalOpen(true);
   };
@@ -523,47 +531,24 @@ export const KnowledgeCenter: React.FC = () => {
     setOcrStep(5); // Vector Index Prep Ready
 
     const defaultContent = uploadTextContent || `Technical dataset ingested from ${uploadFileName}. Purpose: ${uploadReason}`;
-    const targetDocId = isUpdateFlow && targetDocForUpdate ? targetDocForUpdate.id : `doc_${Date.now()}`;
+    const targetDocId = isUpdateFlow && targetDocForUpdate ? targetDocForUpdate.id : crypto.randomUUID();
     const nextVerNum = isUpdateFlow && targetDocForUpdate ? targetDocForUpdate.versions.length + 1 : 1;
-    const newVersionId = `ver_${Date.now()}`;
+    const newVersionId = crypto.randomUUID();
 
-    // Prepare binary or text file payload for Supabase Storage
+    // Prepare binary or text file payload; sent to our own backend, which is the only
+    // path that writes to Supabase Storage and the database (form -> backend -> database).
     const filePayload: File | Blob = rawSelectedFile || new Blob([defaultContent], { 
       type: uploadFileName.endsWith('.pdf') ? 'application/pdf' : 'text/plain;charset=utf-8' 
     });
 
-    // Upload to Supabase Storage in "app-files" bucket
-    // Folder rule: ${auth.uid()}/${featureName}/${itemId}/${uuid}.${extension}
-    let storageFilePath: string | undefined = undefined;
-    let storageBucket: string | undefined = undefined;
-
-    try {
-      const uploadRes = await uploadFileToStorage({
-        userId: currentUser.id,
-        featureName: 'documents',
-        itemId: targetDocId,
-        file: filePayload,
-        fileName: uploadFileName,
-        metadata: {
-          document_id: targetDocId,
-          version_id: newVersionId,
-          version_number: nextVerNum,
-          subsidiary: uploadSubsidiary,
-          document_type: uploadType,
-          uploaded_by_id: currentUser.id,
-          uploaded_by_name: currentUser.name,
-        }
-      });
-
-      if (uploadRes) {
-        storageFilePath = uploadRes.filePath;
-        storageBucket = uploadRes.storageBucket;
-      }
-    } catch (uploadErr) {
-      console.warn('[KnowledgeCenter] Supabase Storage upload note:', uploadErr);
-    }
-
     setIsProcessingOcr(false);
+
+    const uploadedBy = {
+      id: currentUser.id,
+      name: currentUser.name,
+      employeeId: currentUser.employeeId,
+      subsidiary: currentUser.subsidiary,
+    };
 
     if (isUpdateFlow && targetDocForUpdate) {
       const newVersion: DocumentVersion = {
@@ -573,15 +558,8 @@ export const KnowledgeCenter: React.FC = () => {
         fileName: uploadFileName,
         fileSize: uploadFileSize || '12.4 MB',
         fileUrl: uploadedFileDataUrl || (rawSelectedFile && rawSelectedFile.type.startsWith('image/') ? URL.createObjectURL(rawSelectedFile) : undefined),
-        storageFilePath,
-        storageBucket,
         reasonForChange: uploadReason,
-        uploadedBy: {
-          id: currentUser.id,
-          name: currentUser.name,
-          employeeId: currentUser.employeeId,
-          subsidiary: currentUser.subsidiary,
-        },
+        uploadedBy,
         uploadedAt: new Date().toISOString(),
         approvalStatus: 'pending',
         approvalPriority: uploadReason.toLowerCase().includes('variance') || uploadReason.toLowerCase().includes('amendment') || uploadReason.toLowerCase().includes('safety') ? 'urgent' : 'normal',
@@ -592,7 +570,29 @@ export const KnowledgeCenter: React.FC = () => {
         ocrConfidence: 99.4,
       };
 
-      submitNewVersion(targetDocForUpdate.id, newVersion);
+      const newChunks = createDocumentChunks(targetDocForUpdate, newVersion, false);
+
+      if (isSupabaseConfigured) {
+        setIsSavingUpload(true);
+        const saveResult = await persistDocumentUpload({
+          file: filePayload,
+          fileName: uploadFileName,
+          isUpdate: true,
+          document: targetDocForUpdate,
+          version: newVersion,
+          chunks: newChunks,
+        });
+        setIsSavingUpload(false);
+        if ('error' in saveResult) {
+          setToastMessage({ type: 'warning', text: saveResult.details || saveResult.error });
+          return;
+        }
+        newVersion.storageFilePath = saveResult.storageFilePath;
+        newVersion.storageBucket = saveResult.storageBucket;
+      }
+
+      const saved = await submitNewVersion(targetDocForUpdate.id, newVersion, newChunks);
+      if (!saved) return;
     } else {
       const newVersion: DocumentVersion = {
         id: newVersionId,
@@ -601,15 +601,8 @@ export const KnowledgeCenter: React.FC = () => {
         fileName: uploadFileName,
         fileSize: uploadFileSize || '15.8 MB',
         fileUrl: uploadedFileDataUrl || (rawSelectedFile && rawSelectedFile.type.startsWith('image/') ? URL.createObjectURL(rawSelectedFile) : undefined),
-        storageFilePath,
-        storageBucket,
         reasonForChange: uploadReason || 'Initial baseline exploration upload',
-        uploadedBy: {
-          id: currentUser.id,
-          name: currentUser.name,
-          employeeId: currentUser.employeeId,
-          subsidiary: currentUser.subsidiary,
-        },
+        uploadedBy,
         uploadedAt: new Date().toISOString(),
         approvalStatus: 'pending',
         approvalPriority: uploadReason.toLowerCase().includes('safety') || uploadReason.toLowerCase().includes('urgent') ? 'urgent' : 'normal',
@@ -632,7 +625,29 @@ export const KnowledgeCenter: React.FC = () => {
         lastUpdated: new Date().toISOString(),
       };
 
-      addDocument(newDoc);
+      const newChunks = createDocumentChunks(newDoc, newVersion);
+
+      if (isSupabaseConfigured) {
+        setIsSavingUpload(true);
+        const saveResult = await persistDocumentUpload({
+          file: filePayload,
+          fileName: uploadFileName,
+          isUpdate: false,
+          document: newDoc,
+          version: newVersion,
+          chunks: newChunks,
+        });
+        setIsSavingUpload(false);
+        if ('error' in saveResult) {
+          setToastMessage({ type: 'warning', text: saveResult.details || saveResult.error });
+          return;
+        }
+        newVersion.storageFilePath = saveResult.storageFilePath;
+        newVersion.storageBucket = saveResult.storageBucket;
+      }
+
+      const saved = await addDocument(newDoc, newChunks);
+      if (!saved) return;
     }
 
     setIsUploadModalOpen(false);
@@ -1773,11 +1788,11 @@ export const KnowledgeCenter: React.FC = () => {
 
               <button
                 type="button"
-                disabled={!uploadFileName || !uploadReason || isProcessingOcr}
+                disabled={!uploadFileName || !uploadReason || isProcessingOcr || isSavingUpload}
                 onClick={startOcrPipeline}
                 className="px-5 py-2.5 bg-[#141C2B] hover:bg-[#1E293B] disabled:opacity-50 text-white text-xs font-bold rounded-lg flex items-center gap-2"
               >
-                <span>{isUpdateFlow ? 'Submit Revision to Approval Queue' : 'Ingest Document'}</span>
+                <span>{isSavingUpload ? 'Saving to Supabase...' : isUpdateFlow ? 'Submit Revision to Approval Queue' : 'Ingest Document'}</span>
                 <ArrowRight className="w-3.5 h-3.5 text-[#C8892E]" />
               </button>
             </div>

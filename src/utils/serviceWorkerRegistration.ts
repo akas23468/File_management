@@ -74,7 +74,7 @@ export async function syncDocumentsToServiceWorkerCache(documents: any[], chunks
   // Also store in CacheStorage directly if available
   if (typeof window !== 'undefined' && 'caches' in window) {
     try {
-      const cache = await caches.open('khanij-data-v1');
+      const cache = await caches.open('khanij-data-v2');
       await cache.put(
         '/api/offline/documents',
         new Response(JSON.stringify(documents), {

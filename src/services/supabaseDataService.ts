@@ -7,7 +7,9 @@ import {
   User, 
   Subsidiary,
   DocumentType,
-  ApprovalStatus
+  ApprovalStatus,
+  QueryRecord,
+  ReportRecord
 } from '../types';
 
 export interface SupabaseProfile {
@@ -22,6 +24,128 @@ export interface SupabaseProfile {
 }
 
 export const STORAGE_BUCKET = 'app-files';
+
+async function persistThroughBackend(endpoint: string, payload: object): Promise<boolean> {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (session?.access_token) {
+    headers['Authorization'] = `Bearer ${session.access_token}`;
+  }
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    console.warn(`[MineMind backend] ${endpoint} rejected:`, result.details || result.error || response.statusText);
+    return false;
+  }
+  return true;
+}
+
+export interface DocumentUploadResult {
+  documentId: string;
+  versionId: string;
+  storageFilePath: string;
+  storageBucket: string;
+}
+
+export interface DocumentUploadFailure {
+  error: string;
+  details?: string;
+}
+
+/**
+ * Single authoritative save path: sends the file and its document/version/chunk metadata
+ * to the Flask backend, which uploads to Storage and writes every database row.
+ * Works for all users (real Supabase auth, demo accounts, or local logins).
+ */
+export async function persistDocumentUpload(params: {
+  file: File | Blob;
+  fileName: string;
+  isUpdate: boolean;
+  document: { id: string; documentCode: string; title: string; type: DocumentType; department: string; subsidiary: Subsidiary };
+  version: DocumentVersion;
+  chunks: Chunk[];
+}): Promise<DocumentUploadResult | DocumentUploadFailure> {
+  const supabase = getSupabase();
+  if (!supabase) return { error: 'Supabase is not configured in this browser session.' };
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const accessToken = session?.access_token;
+
+  const { file, fileName, isUpdate, document, version, chunks } = params;
+  const meta = {
+    documentId: document.id,
+    versionId: version.id,
+    versionNumber: version.versionNumber,
+    isUpdate,
+    title: document.title,
+    documentCode: document.documentCode,
+    type: document.type,
+    department: document.department,
+    subsidiary: document.subsidiary,
+    reasonForChange: version.reasonForChange,
+    extractedText: version.extractedText,
+    fileSize: version.fileSize,
+    approvalStatus: version.approvalStatus,
+    approvalPriority: version.approvalPriority,
+    aiRiskReason: version.aiRiskReason,
+    ocrConfidence: version.ocrConfidence,
+    uploadedById: version.uploadedBy?.id,
+    uploadedByName: version.uploadedBy?.name,
+    uploadedAt: version.uploadedAt,
+    chunks: chunks.map(c => ({
+      id: c.id,
+      documentTitle: c.documentTitle,
+      documentCode: c.documentCode,
+      versionNumber: c.versionNumber,
+      pageOrSheetRef: c.pageOrSheetRef,
+      subsidiary: c.subsidiary,
+      text: c.text,
+      isApproved: c.isApproved,
+      topicTag: c.topicTag,
+    })),
+  };
+
+  const formData = new FormData();
+  formData.append('file', file, fileName);
+  formData.append('meta', JSON.stringify(meta));
+
+  try {
+    const headers: Record<string, string> = {};
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+
+    const response = await fetch('/api/persistence/document-upload', {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.warn('[MineMind backend] document-upload rejected:', result.details || result.error || response.statusText);
+      return {
+        error: result.error || 'Supabase rejected the upload.',
+        details: result.details,
+      };
+    }
+    return result as DocumentUploadResult;
+  } catch (err) {
+    console.error('[MineMind backend] document-upload request failed:', err);
+    return { error: 'Could not reach the local upload backend.' };
+  }
+}
 
 /**
  * Upload a binary File or Blob to Supabase Storage in the private "app-files" bucket.
@@ -211,29 +335,8 @@ export async function fetchUserProfile(userId: string, email?: string): Promise<
 
 // Upsert user profile
 export async function syncUserProfile(user: User): Promise<boolean> {
-  const supabase = getSupabase();
-  if (!supabase) return false;
-
   try {
-    const { error } = await supabase
-      .from('profiles')
-      .upsert({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        employee_id: user.employeeId,
-        role: user.role,
-        subsidiary: user.subsidiary,
-        department: user.department,
-        designation: user.designation,
-        updated_at: new Date().toISOString(),
-      });
-
-    if (error) {
-      console.warn('[Supabase] syncUserProfile warning:', error.message);
-      return false;
-    }
-    return true;
+    return await persistThroughBackend('/api/persistence/profile', user);
   } catch (err) {
     console.error('[Supabase] syncUserProfile error:', err);
     return false;
@@ -304,6 +407,12 @@ export async function fetchAllDocuments(): Promise<Document[] | null> {
           name: row.reviewed_by_name,
         } : undefined,
         approvedAt: row.reviewed_at,
+        reviewedBy: row.reviewed_by_name ? {
+          id: row.reviewed_by_id || 'usr_admin',
+          name: row.reviewed_by_name,
+        } : undefined,
+        reviewedAt: row.reviewed_at,
+        reviewerNote: row.reviewer_note || row.reviewer_notes,
         changesRequestedNote: row.reviewer_note || row.reviewer_notes,
       };
 
@@ -462,7 +571,10 @@ export async function persistNewDocument(doc: Document, chunkList: Chunk[]): Pro
       created_at: doc.createdAt,
       updated_at: doc.lastUpdated || doc.createdAt,
     });
-    if (docErr) console.warn('[Supabase] insert document notice:', docErr.message);
+    if (docErr) {
+      console.error('[Supabase] Could not insert document:', docErr.message);
+      return false;
+    }
 
     // 2. Insert versions
     for (const v of doc.versions) {
@@ -476,7 +588,6 @@ export async function persistNewDocument(doc: Document, chunkList: Chunk[]): Pro
         file_name: v.fileName,
         file_size: v.fileSize,
         file_path: v.storageFilePath || null,
-        storage_file_path: v.storageFilePath || null,
         storage_bucket: v.storageBucket || (v.storageFilePath ? STORAGE_BUCKET : null),
         uploaded_by_id: uploaderId,
         uploaded_by_name: v.uploadedBy.name,
@@ -490,7 +601,11 @@ export async function persistNewDocument(doc: Document, chunkList: Chunk[]): Pro
         approval_priority: v.approvalPriority || 'normal',
         ai_risk_reason: v.aiRiskReason,
       });
-      if (verErr) console.warn('[Supabase] insert document_version notice:', verErr.message);
+      if (verErr) {
+        console.error('[Supabase] Could not insert document version:', verErr.message);
+        await supabase.from('documents').delete().eq('id', docId);
+        return false;
+      }
 
       if (v.approvalStatus === 'pending') {
         const apprId = generateDbId();
@@ -506,7 +621,11 @@ export async function persistNewDocument(doc: Document, chunkList: Chunk[]): Pro
           status: 'pending',
           diff_summary: `Initial upload of ${doc.documentCode} v${v.versionNumber}`,
         });
-        if (apprErr) console.warn('[Supabase] insert approval notice:', apprErr.message);
+        if (apprErr) {
+          console.error('[Supabase] Could not insert approval request:', apprErr.message);
+          await supabase.from('documents').delete().eq('id', docId);
+          return false;
+        }
       }
     }
 
@@ -527,7 +646,11 @@ export async function persistNewDocument(doc: Document, chunkList: Chunk[]): Pro
         is_approved: c.isApproved,
         topic_tag: c.topicTag,
       });
-      if (chunkErr) console.warn('[Supabase] insert chunk notice:', chunkErr.message);
+      if (chunkErr) {
+        console.error('[Supabase] Could not insert document chunk:', chunkErr.message);
+        await supabase.from('documents').delete().eq('id', docId);
+        return false;
+      }
     }
 
     console.log(`[Supabase Data Layer] Successfully committed new document "${doc.title}" to documents, document_versions, and document_chunks tables.`);
@@ -554,7 +677,6 @@ export async function persistNewVersion(docId: string, version: DocumentVersion,
       file_name: version.fileName,
       file_size: version.fileSize,
       file_path: version.storageFilePath || null,
-      storage_file_path: version.storageFilePath || null,
       storage_bucket: version.storageBucket || (version.storageFilePath ? STORAGE_BUCKET : null),
       uploaded_by_id: uploaderId,
       uploaded_by_name: version.uploadedBy.name,
@@ -568,7 +690,10 @@ export async function persistNewVersion(docId: string, version: DocumentVersion,
       approval_priority: version.approvalPriority || 'normal',
       ai_risk_reason: version.aiRiskReason,
     });
-    if (verErr) console.warn('[Supabase] insert version notice:', verErr.message);
+    if (verErr) {
+      console.error('[Supabase] Could not insert document version:', verErr.message);
+      return false;
+    }
 
     if (version.approvalStatus === 'pending') {
       const apprId = generateDbId();
@@ -584,7 +709,11 @@ export async function persistNewVersion(docId: string, version: DocumentVersion,
         status: 'pending',
         diff_summary: version.reasonForChange,
       });
-      if (apprErr) console.warn('[Supabase] insert approval notice:', apprErr.message);
+      if (apprErr) {
+        console.error('[Supabase] Could not insert approval request:', apprErr.message);
+        await supabase.from('document_versions').delete().eq('id', versionId);
+        return false;
+      }
     }
 
     for (const c of newChunks) {
@@ -602,7 +731,11 @@ export async function persistNewVersion(docId: string, version: DocumentVersion,
         is_approved: c.isApproved,
         topic_tag: c.topicTag,
       });
-      if (chunkErr) console.warn('[Supabase] insert new version chunk notice:', chunkErr.message);
+      if (chunkErr) {
+        console.error('[Supabase] Could not insert version chunk:', chunkErr.message);
+        await supabase.from('document_versions').delete().eq('id', versionId);
+        return false;
+      }
     }
 
     console.log(`[Supabase Data Layer] Successfully inserted version v${version.versionNumber} for doc ${docId}.`);
@@ -652,26 +785,36 @@ export async function persistApprovalReview(
 
   try {
     const now = new Date().toISOString();
-    await supabase.from('document_versions').update({
+    const { error: versionError } = await supabase.from('document_versions').update({
       approval_status: status,
-      reviewed_by_id: reviewer.id,
       reviewed_by_name: reviewer.name,
       reviewed_at: now,
       reviewer_note: note || null,
     }).eq('id', versionId);
+    if (versionError) {
+      console.error('[Supabase] Error updating document version approval:', versionError);
+      return false;
+    }
 
-    await supabase.from('approvals').update({
+    const { error: approvalError } = await supabase.from('approvals').update({
       status: status,
-      reviewed_by_id: reviewer.id,
       reviewed_by_name: reviewer.name,
       reviewed_at: now,
       reviewer_notes: note || null,
     }).eq('version_id', versionId);
+    if (approvalError) {
+      console.error('[Supabase] Error updating approval queue entry:', approvalError);
+      return false;
+    }
 
     if (status === 'approved') {
-      await supabase.from('document_chunks').update({
+      const { error: chunkError } = await supabase.from('document_chunks').update({
         is_approved: true,
       }).eq('version_id', versionId);
+      if (chunkError) {
+        console.error('[Supabase] Error publishing document chunks:', chunkError);
+        return false;
+      }
     }
 
     return true;
@@ -706,4 +849,43 @@ export async function persistAuditLog(entry: AuditLogEntry): Promise<boolean> {
     console.error('[Supabase] Error inserting audit log:', err);
     return false;
   }
+}
+
+export async function fetchQueryHistory(userId: string): Promise<QueryRecord[] | null> {
+  const supabase = getSupabase();
+  if (!supabase || !isUuid(userId)) return null;
+
+  const { data, error } = await supabase
+    .from('query_history')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (error || !data) {
+    console.warn('[Supabase] fetchQueryHistory error:', error?.message);
+    return null;
+  }
+
+  return data.map((row: any) => ({
+    id: row.id,
+    userId: row.user_id,
+    userName: row.user_name,
+    userRole: row.user_role,
+    questionText: row.question_text,
+    answerText: row.answer_text,
+    aiSummary: row.ai_summary,
+    citations: row.citations || [],
+    confidence: Number(row.confidence) || 0,
+    foundInKnowledgeBase: row.found_in_knowledge_base,
+    draftOfficialReply: row.draft_official_reply,
+    createdAt: row.created_at,
+  }));
+}
+
+export async function persistQueryHistory(query: QueryRecord): Promise<boolean> {
+  return persistThroughBackend('/api/persistence/query-history', query);
+}
+
+export async function persistReport(report: ReportRecord): Promise<boolean> {
+  return persistThroughBackend('/api/persistence/report', report);
 }

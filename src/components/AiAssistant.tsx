@@ -31,7 +31,8 @@ import {
   VolumeX,
   Radio,
   Square,
-  Globe
+  Globe,
+  CheckCircle2,
 } from 'lucide-react';
 
 const SUBSIDIARY_PRESETS: Record<string, string[]> = {
@@ -69,6 +70,8 @@ const SUBSIDIARY_PRESETS: Record<string, string[]> = {
 export const AiAssistant: React.FC = () => {
   const { 
     chunks, 
+    documents,
+    currentUser,
     addQueryRecord, 
     setActiveCitationForModal, 
     selectedSubsidiary, 
@@ -91,9 +94,9 @@ export const AiAssistant: React.FC = () => {
     citations: SourceCitation[];
     confidence: number;
     draftOfficialReply?: string;
+    requiresClarification?: boolean;
   } | null>(null);
 
-  const [showSimilarCases, setShowSimilarCases] = useState<boolean>(true);
   const [showDraftReply, setShowDraftReply] = useState<boolean>(false);
   const [copiedAnswer, setCopiedAnswer] = useState<boolean>(false);
   const [copiedDraft, setCopiedDraft] = useState<boolean>(false);
@@ -108,6 +111,14 @@ export const AiAssistant: React.FC = () => {
   const [voiceSupported, setVoiceSupported] = useState<boolean>(true);
   const [speechStatusText, setSpeechStatusText] = useState<string>('');
   const recognitionRef = useRef<any>(null);
+
+  const retrievableChunks = chunks.filter(chunk => {
+    if (chunk.isApproved) return true;
+    const sourceVersion = documents
+      .find(document => document.id === chunk.documentId)
+      ?.versions.find(version => version.id === chunk.documentVersionId);
+    return sourceVersion?.uploadedBy.id === currentUser.id;
+  }).map(chunk => ({ ...chunk, isApproved: true }));
 
   // Initialize Speech Recognition
   useEffect(() => {
@@ -257,7 +268,7 @@ export const AiAssistant: React.FC = () => {
     }
   };
 
-  const handleAsk = async (queryText?: string) => {
+  const handleAsk = async (queryText?: string, selectedDocumentId?: string) => {
     const q = queryText || question;
     if (!q.trim()) return;
 
@@ -271,7 +282,7 @@ export const AiAssistant: React.FC = () => {
       setTimeout(() => {
         const offlineData = queryOfflineKnowledgeBase(
           q,
-          chunks.filter(c => c.isApproved),
+          retrievableChunks,
           selectedSubsidiary
         );
 
@@ -316,8 +327,9 @@ export const AiAssistant: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question: q,
-          approvedChunks: chunks.filter(c => c.isApproved),
+          approvedChunks: retrievableChunks,
           subsidiaryFilter: selectedSubsidiary,
+          selectedDocumentId,
         }),
       });
 
@@ -366,7 +378,7 @@ export const AiAssistant: React.FC = () => {
       console.warn('Online AI ask failed; falling back to offline underground RAG:', err);
       const offlineFallback = queryOfflineKnowledgeBase(
         q,
-        chunks.filter(c => c.isApproved),
+        retrievableChunks,
         selectedSubsidiary
       );
 
@@ -415,17 +427,6 @@ export const AiAssistant: React.FC = () => {
     }
   };
 
-  // Filter similar cases if search query matches tags
-  const matchedCases = similarCases.filter(sc => {
-    if (!question) return true;
-    const qLower = question.toLowerCase();
-    return sc.tags.some(t => qLower.includes(t.toLowerCase())) || 
-           sc.subsidiary.toLowerCase().includes(qLower) ||
-           qLower.includes('slope') && sc.title.includes('Slope') ||
-           qLower.includes('water') && sc.title.includes('Water') ||
-           qLower.includes('hydrogeology') && sc.title.includes('Groundwater');
-  });
-
   return (
     <div id="ai-assistant-view" className="p-4 sm:p-6 md:p-8 space-y-5 sm:space-y-7 max-w-7xl mx-auto">
       {/* Top Banner: Strict Grounding Directives */}
@@ -440,15 +441,10 @@ export const AiAssistant: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-xs font-mono text-[#CBD5E1] cursor-pointer bg-[#192234] px-3 py-1.5 rounded-lg border border-[#334155]">
-            <input
-              type="checkbox"
-              checked={showSimilarCases}
-              onChange={(e) => setShowSimilarCases(e.target.checked)}
-              className="rounded text-[#C8892E] focus:ring-0"
-            />
-            <span>Historical Precedents Panel</span>
-          </label>
+          <div className="flex items-center gap-2 text-xs font-mono text-[#CBD5E1] bg-[#192234] px-3 py-1.5 rounded-lg border border-[#334155]">
+            <CheckCircle2 className="w-4 h-4 text-[#22C55E]" />
+            <span>Document Ingestion Pipeline Active</span>
+          </div>
         </div>
       </div>
 
@@ -604,8 +600,8 @@ export const AiAssistant: React.FC = () => {
 
       {/* Answer & Citations Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Answer Main Panel: 8 Cols (or 12 if similar cases hidden) */}
-        <div className={showSimilarCases ? "lg:col-span-8 space-y-6" : "lg:col-span-12 space-y-6"}>
+        {/* Answer Main Panel: 8 Cols */}
+        <div className="lg:col-span-8 space-y-6">
           {isSearching && (
             <div className="bg-white border border-[#E4E0D6] rounded-xl p-8 text-center space-y-3">
               <Sparkles className="w-8 h-8 text-[#C8892E] animate-spin mx-auto" />
@@ -623,7 +619,12 @@ export const AiAssistant: React.FC = () => {
               {/* Status Header */}
               <div className="flex items-center justify-between pb-4 border-b border-[#EFEBE2]">
                 <div className="flex flex-wrap items-center gap-2">
-                  {activeResult.foundInKnowledgeBase ? (
+                  {activeResult.requiresClarification ? (
+                    <span className="flex items-center gap-1 text-xs font-mono font-bold text-[#92400E] bg-[#FEF3C7] px-2.5 py-1 rounded-md border border-[#FDE68A]">
+                      <HelpCircle className="w-4 h-4" />
+                      <span>Source Selection Required</span>
+                    </span>
+                  ) : activeResult.foundInKnowledgeBase ? (
                     <span className="flex items-center gap-1 text-xs font-mono font-bold text-[#16A34A] bg-[#F0FDF4] px-2.5 py-1 rounded-md border border-[#BBF7D0]">
                       <ShieldCheck className="w-4 h-4" />
                       <span>{activeResult.confidence.toFixed(1)}% Grounded Confidence</span>
@@ -734,7 +735,31 @@ export const AiAssistant: React.FC = () => {
 
               {/* Generated Answer / Explicit Empty State */}
               <div className="text-sm sm:text-[15px] leading-relaxed sm:leading-7 text-[#141C2B] font-sans">
-                {activeResult.foundInKnowledgeBase ? (
+                {activeResult.requiresClarification ? (
+                  <div className="py-4 text-center bg-[#FEF3C7] rounded-lg border border-[#FDE68A] p-6 space-y-3">
+                    <HelpCircle className="w-8 h-8 text-[#C8892E] mx-auto" />
+                    <p className="font-serif font-bold text-base text-[#141C2B]">{activeResult.answer}</p>
+                    <p className="text-xs text-[#64748B] max-w-md mx-auto">
+                      Select one matching document below. The answer will be generated only from that document's approved chunks.
+                    </p>
+                    <div className="max-w-2xl mx-auto grid gap-2 text-left">
+                      {activeResult.citations.map((citation) => (
+                        <button
+                          key={citation.documentId}
+                          type="button"
+                          onClick={() => handleAsk(question, citation.documentId)}
+                          className="w-full bg-white border border-[#E4E0D6] hover:border-[#C8892E] rounded-lg p-3 flex items-center justify-between gap-3 text-left transition-colors"
+                        >
+                          <span className="min-w-0">
+                            <span className="block font-semibold text-[#141C2B] truncate">{citation.documentTitle}</span>
+                            <span className="block text-[11px] font-mono text-[#64748B] mt-0.5">{citation.documentCode} v{citation.versionNumber}.0 · {citation.pageOrSheetRef}</span>
+                          </span>
+                          <ArrowRight className="w-4 h-4 text-[#C8892E] flex-shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : activeResult.foundInKnowledgeBase ? (
                   <div className="space-y-3 whitespace-pre-line font-normal text-[#1E293B]">
                     {displayedAnswer}
                   </div>
@@ -911,56 +936,6 @@ export const AiAssistant: React.FC = () => {
           )}
         </div>
 
-        {/* Similar Historical Cases Side Panel: 4 Cols (Section 5.5 Spec) */}
-        {showSimilarCases && (
-          <div className="lg:col-span-4 space-y-4">
-            <div className="bg-white border border-[#E4E0D6] rounded-xl p-5 shadow-xs space-y-4">
-              <div className="flex items-center justify-between pb-2 border-b border-[#EFEBE2]">
-                <div className="flex items-center gap-1.5">
-                  <History className="w-4 h-4 text-[#C8892E]" />
-                  <h3 className="font-serif font-bold text-sm text-[#141C2B]">
-                    Similar Historical Precedents
-                  </h3>
-                </div>
-                <span className="text-[10px] font-mono bg-[#EFEBE2] px-1.5 py-0.5 rounded text-[#64748B]">
-                  {matchedCases.length} records
-                </span>
-              </div>
-
-              <div className="space-y-3">
-                {matchedCases.slice(0, 3).map((item) => (
-                  <div 
-                    key={item.id}
-                    className="p-3 bg-[#FAF8F3] border border-[#E4E0D6] rounded-lg text-xs space-y-1.5 hover:border-[#C8892E] transition-all"
-                  >
-                    <div className="flex items-center justify-between text-[10px] font-mono text-[#64748B]">
-                      <span className="font-bold text-[#141C2B]">{item.subsidiary} · {item.year}</span>
-                      <span className="text-[#16A34A] font-bold">{item.outcome}</span>
-                    </div>
-                    <h4 className="font-bold text-[#141C2B] text-xs">
-                      {item.title}
-                    </h4>
-                    <p className="text-[11px] text-[#475569] leading-relaxed">
-                      {item.summary}
-                    </p>
-                    <div className="pt-1 flex items-center justify-between text-[10px] font-mono text-[#C8892E]">
-                      <span>Ref: {item.referenceDocCode}</span>
-                      <button 
-                        onClick={() => {
-                          setQuestion(`Tell me more about precedent ${item.referenceDocCode} in ${item.subsidiary}`);
-                          handleAsk(`Tell me more about precedent ${item.referenceDocCode} in ${item.subsidiary}`);
-                        }}
-                        className="hover:underline"
-                      >
-                        Ask this case →
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
