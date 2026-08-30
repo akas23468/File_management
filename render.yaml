@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: minemind-ai
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: XAI_API_KEY
+        sync: false

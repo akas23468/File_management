@@ -726,6 +726,7 @@ def frontend(route: str = "") -> Any:
 
 if __name__ == "__main__":
     load_dotenv()
-    ensure_frontend_build()
+    if not (DIST_DIR / "index.html").exists():
+        ensure_frontend_build()
     print(f"MineMind Python server running at http://localhost:{PORT}")
     app.run(host="0.0.0.0", port=PORT, debug=False)
