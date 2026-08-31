@@ -271,9 +271,8 @@ export const LoginScreen: React.FC = () => {
 
     try {
       setIsSubmitting(true);
-      const redirectTo = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)
-        ? `http://localhost:${window.location.port || '3000'}`
-        : window.location.origin;
+      const redirectTo = window.location.origin;
+
       const { error } = await client.auth.signInWithOAuth({
         provider: 'google',
         options: {
