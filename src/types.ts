@@ -221,6 +221,7 @@ export interface ReportRecord {
   summaryExecutive?: string;
   tables?: ExtractedTable[];
   citations: SourceCitation[];
+  numberedSources?: SourceCitation[]; // ordered (SOURCE n) map used for inline clickable citations
   status?: 'draft' | 'submitted_to_admin' | 'verified_official';
   createdAt: string;
 }

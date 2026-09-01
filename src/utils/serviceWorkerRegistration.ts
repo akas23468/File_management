@@ -12,7 +12,11 @@ export function registerServiceWorker(
   onSuccess?: (reg: ServiceWorkerRegistration) => void,
   onUpdate?: (reg: ServiceWorkerRegistration) => void
 ): void {
-  if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  if (
+    typeof window !== 'undefined' &&
+    'serviceWorker' in navigator &&
+    window.location.protocol !== 'file:'
+  ) {
     window.addEventListener('load', () => {
       const swUrl = '/sw.js';
 

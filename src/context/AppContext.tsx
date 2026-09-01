@@ -120,6 +120,7 @@ interface AppContextType {
   // Reports
   reports: ReportRecord[];
   addReportRecord: (report: Omit<ReportRecord, 'id' | 'createdAt'>) => ReportRecord;
+  updateReportRecord: (reportId: string, changes: Partial<ReportRecord>) => void;
   reportDraftFromAi: { text: string; citations: SourceCitation[] } | null;
   setReportDraftFromAi: (draft: { text: string; citations: SourceCitation[] } | null) => void;
   
@@ -1508,6 +1509,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newReport;
   };
 
+  const updateReportRecord = (reportId: string, changes: Partial<ReportRecord>) => {
+    setReports(prev => prev.map(r => (r.id === reportId ? { ...r, ...changes } : r)));
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      const updated = reports.find(r => r.id === reportId);
+      if (updated) persistReport({ ...updated, ...changes });
+    }
+  };
+
   return (
     <AppContext.Provider value={{
       currentUser,
@@ -1553,6 +1562,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       similarCases,
       reports,
       addReportRecord,
+      updateReportRecord,
       reportDraftFromAi,
       setReportDraftFromAi,
       auditLogs,

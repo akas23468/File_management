@@ -338,6 +338,113 @@ def ask_groq(question: str, matches: list[dict[str, Any]]) -> dict[str, Any] | N
     return json.loads(response["choices"][0]["message"]["content"])
 
 
+def call_llm_json(system_prompt: str, user_prompt: str, temperature: float = 0.15) -> tuple[dict[str, Any] | None, str]:
+    """Generic grounded JSON-completion helper shared by the report AI endpoints.
+
+    Tries xAI Grok first, then Groq, using whichever key is present in .env
+    (same env vars as ask_xai/ask_groq above). Returns (parsed_json, provider)
+    or (None, "local-heuristic-engine") if no provider is configured or every
+    call fails, so callers can fall back to deterministic logic.
+    """
+    providers = (
+        ("xai-grok", "XAI_API_KEY", "MY_XAI_API_KEY", "https://api.x.ai/v1/chat/completions", os.getenv("GROK_MODEL", "grok-4")),
+        ("groq", "GROQ_API_KEY", "MY_GROQ_API_KEY", "https://api.groq.com/openai/v1/chat/completions", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")),
+    )
+    for provider_name, env_key, placeholder, url, model in providers:
+        api_key = os.getenv(env_key, "").strip()
+        if not api_key or api_key == placeholder:
+            continue
+        try:
+            response = json_post(
+                url,
+                {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "temperature": temperature,
+                },
+                {"Authorization": f"Bearer {api_key}"},
+            )
+            raw_content = response["choices"][0]["message"]["content"]
+            return json.loads(raw_content), provider_name
+        except (HTTPError, URLError, KeyError, IndexError, json.JSONDecodeError) as error:
+            print(f"{provider_name} call failed: {error}")
+            continue
+    return None, "local-heuristic-engine"
+
+
+# ---------------------------------------------------------------------------
+# Report intent extraction (Step 2 of the report wizard) — mirrors the
+# frontend heuristic parse in ReportGenerator.tsx so the wizard behaves
+# consistently even if a request skips the network, then lets a live LLM
+# (when XAI_API_KEY / GROQ_API_KEY is present in .env) confirm or correct it.
+# ---------------------------------------------------------------------------
+REPORT_TYPE_KEYWORDS: list[tuple[str, list[str]]] = [
+    ("production_variance", ["production", "variance", "target", "actual", "dispatch", "output"]),
+    ("reserve_assessment", ["reserve", "geological", "seam", "borehole", "assay", "geology"]),
+    ("compliance_brief", ["compliance", "dgms", "environmental", "groundwater", "slope", "audit"]),
+    ("safety_memo", ["incident", "water influx", "inundation", "strata", "safety memo", "accident"]),
+]
+
+METRIC_SETS: dict[str, list[str]] = {
+    "production_variance": ["Production Target", "Actual Production", "Variance", "Achievement %", "Grade", "Reasons for Deviation"],
+    "reserve_assessment": ["Proved Reserves", "Indicated Reserves", "Inferred Reserves", "Seam-wise Breakdown", "Grade Distribution"],
+    "compliance_brief": ["Groundwater Setback Compliance", "Slope Stability Factor of Safety", "DGMS Observations", "Corrective Actions"],
+    "safety_memo": ["Incident Timeline", "Water Influx Volume", "Barrier Pillar Status", "Precedent Cases", "Mitigation Steps"],
+}
+
+SOURCE_SETS: dict[str, list[str]] = {
+    "production_variance": ["Production records", "Monthly reports", "Dispatch data", "Historical reports"],
+    "reserve_assessment": ["Geological survey reports", "Borehole logs", "Seam assay data"],
+    "compliance_brief": ["Environmental audit reports", "DGMS circulars", "Slope stability studies"],
+    "safety_memo": ["Incident reports", "SOP documents", "Historical safety memos"],
+}
+
+MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
+
+SUBSIDIARY_CODES = ("CMPDI HQ", "BCCL", "SECL", "NCL", "CCL", "ECL", "WCL", "MCL")
+
+
+def infer_report_type(text: str) -> str:
+    lower = text.lower()
+    for report_type, keywords in REPORT_TYPE_KEYWORDS:
+        if any(keyword in lower for keyword in keywords):
+            return report_type
+    return "production_variance"
+
+
+def infer_subsidiary(text: str) -> str:
+    upper = text.upper()
+    for code in SUBSIDIARY_CODES:
+        if code in upper:
+            return code
+    return "ALL"
+
+
+def infer_period(text: str) -> str:
+    lower = text.lower()
+    now = datetime.now(timezone.utc)
+    year_match = re.search(r"\b(20\d{2})\b", text)
+    year = year_match.group(1) if year_match else str(now.year)
+
+    month_idx = next((i for i, name in enumerate(MONTH_NAMES) if name in lower), -1)
+    if month_idx >= 0:
+        return f"{MONTH_NAMES[month_idx].capitalize()} {year}"
+
+    quarter_match = re.search(r"q([1-4])", lower)
+    if quarter_match or "quarter" in lower:
+        quarter = quarter_match.group(1) if quarter_match else str((now.month - 1) // 3 + 1)
+        return f"FY {year}-{str(int(year) + 1)[2:]} (Q{quarter})"
+
+    if "annual" in lower or "full year" in lower:
+        return f"FY {year}-{str(int(year) + 1)[2:]} (Annual)"
+
+    return now.strftime("%B %Y")
+
+
 @app.get("/api/health")
 def health() -> Any:
     return jsonify({
@@ -671,6 +778,114 @@ def summarize_document() -> Any:
     })
 
 
+@app.post("/api/ai/report-intent")
+def report_intent() -> Any:
+    """Step 2 of the wizard — read the officer's request (or template pick) and
+    resolve report type, subsidiary, period, metrics, and required source
+    categories. Runs the same heuristics the frontend uses first (so it never
+    fails silently), then asks a live LLM to confirm/correct when a key is
+    configured in .env."""
+    data = request.get_json(silent=True) or {}
+    raw_request = str(data.get("rawRequest", "")).strip()
+    if not raw_request:
+        return jsonify({"error": "rawRequest is required"}), 400
+
+    inferred_type = infer_report_type(raw_request)
+    inferred_subsidiary = infer_subsidiary(raw_request)
+    inferred_period = infer_period(raw_request)
+    metrics = METRIC_SETS.get(inferred_type, METRIC_SETS["production_variance"])
+    required_sources = SOURCE_SETS.get(inferred_type, SOURCE_SETS["production_variance"])
+
+    system_prompt = (
+        "You are the intent-classification engine for CMPDI/Coal India's statutory report wizard. "
+        "Given an officer's plain-language report request, return strict JSON only (no prose, no markdown) "
+        "with keys: reportType (one of production_variance, reserve_assessment, compliance_brief, safety_memo), "
+        "subsidiary (one of ALL, CMPDI HQ, BCCL, SECL, NCL, CCL, ECL, WCL, MCL), "
+        "period (a short human string such as 'August 2026' or 'FY 2025-26 (Q3)'), "
+        "metrics (3 to 6 short metric labels this report type must cover), "
+        "requiredSources (2 to 4 short source-document categories needed to compile it)."
+    )
+    user_prompt = (
+        f"Officer request: \"{raw_request}\"\n"
+        f"Request mode: {data.get('mode', 'ai')}\n"
+        f"Current date: {data.get('currentDate') or datetime.now(timezone.utc).isoformat()}\n"
+        f"Local heuristic guess — reportType: {inferred_type}, subsidiary: {inferred_subsidiary}, period: {inferred_period}.\n"
+        "Confirm the heuristic guess if it looks right, correct it if not, and fill in metrics/requiredSources."
+    )
+    parsed, provider = call_llm_json(system_prompt, user_prompt, temperature=0.1)
+
+    result: dict[str, Any] = {
+        "reportType": inferred_type,
+        "subsidiary": inferred_subsidiary,
+        "period": inferred_period,
+        "metrics": metrics,
+        "requiredSources": required_sources,
+        "provider": "local-heuristic-engine",
+    }
+    if parsed:
+        if parsed.get("reportType") in METRIC_SETS:
+            result["reportType"] = parsed["reportType"]
+        if isinstance(parsed.get("subsidiary"), str) and parsed["subsidiary"].strip():
+            result["subsidiary"] = parsed["subsidiary"].strip()
+        if isinstance(parsed.get("period"), str) and parsed["period"].strip():
+            result["period"] = parsed["period"].strip()
+        if isinstance(parsed.get("metrics"), list) and parsed["metrics"]:
+            result["metrics"] = [str(metric) for metric in parsed["metrics"]][:6]
+        if isinstance(parsed.get("requiredSources"), list) and parsed["requiredSources"]:
+            result["requiredSources"] = [str(source) for source in parsed["requiredSources"]][:4]
+        result["provider"] = provider
+
+    return jsonify(result)
+
+
+@app.post("/api/ai/report-chat")
+def report_chat() -> Any:
+    """Step 5 'Ask AI about this report' panel — answers grounded strictly in
+    the generated report's own content and its attached citations."""
+    data = request.get_json(silent=True) or {}
+    question = str(data.get("question", "")).strip()
+    report_content = str(data.get("reportContent", "")).strip()
+    citations = data.get("citations") if isinstance(data.get("citations"), list) else []
+
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+    if not report_content:
+        return jsonify({"error": "reportContent is required"}), 400
+
+    citation_lines = "\n".join(
+        f"- {c.get('documentTitle', 'Unknown Source')} ({c.get('documentCode', '')} v{c.get('versionNumber', '')}, "
+        f"{c.get('pageOrSheetRef', '')}): {str(c.get('excerpt', ''))[:200]}"
+        for c in citations if isinstance(c, dict)
+    )
+
+    system_prompt = (
+        "You are a statutory mining-report assistant. Answer the officer's question using ONLY the report "
+        "content and citations given below — never invent figures, dates, or facts not present there. If the "
+        "report doesn't address the question, say so plainly. Return strict JSON only with one key: "
+        "answer (2-5 concise sentences, plain language)."
+    )
+    user_prompt = (
+        f"Report content:\n{report_content[:6000]}\n\n"
+        f"Attached citations:\n{citation_lines or 'None'}\n\n"
+        f"Officer question: {question}"
+    )
+    parsed, provider = call_llm_json(system_prompt, user_prompt, temperature=0.2)
+    if parsed and isinstance(parsed.get("answer"), str) and parsed["answer"].strip():
+        return jsonify({"answer": parsed["answer"].strip(), "provider": provider})
+
+    # No AI provider configured / call failed — grounded local fallback:
+    # return whichever paragraph of the report best matches the question.
+    paragraphs = [p.strip() for p in report_content.split("\n\n") if len(p.strip()) > 30]
+    terms = [term for term in re.sub(r"[^a-z0-9\s]", " ", question.lower()).split() if len(term) > 2]
+    best_paragraph, best_score = None, 0
+    for paragraph in paragraphs:
+        score = sum(1 for term in terms if term in paragraph.lower())
+        if score > best_score:
+            best_paragraph, best_score = paragraph, score
+    answer = best_paragraph or "The report does not directly address this question — please review the attached source citations for further context."
+    return jsonify({"answer": answer, "provider": "local-grounded-fallback"})
+
+
 @app.post("/api/ai/report")
 def generate_report() -> Any:
     data = request.get_json(silent=True) or {}
@@ -706,13 +921,49 @@ def generate_report() -> Any:
 
     source_lines = "\n".join(f"- **{item['title']}** ({item['code']} {', '.join(f'v{version}.0' for version in sorted(item['versions']))})" for item in sources.values())
     observations = "\n\n".join(f"**Point 2.{index}** *({chunk.get('documentCode', 'CMPDI')}, {chunk.get('pageOrSheetRef', 'Archive')})*\n{chunk['text'].strip()}" for index, chunk in enumerate(unique_chunks, start=1))
-    content = (
+    deterministic_content = (
         f"## 1. Statutory Context & Executive Directive\nThis **{template}** has been formally compiled for "
         f"**{subsidiary}** covering review period **{period}**.\n\n---\n\n"
         f"## 2. Synthesized Technical Findings\n{source_lines}\n\n### Detailed Observations & Geological/Operational Parameters:\n\n{observations}\n\n---\n\n"
         "## 3. Statutory Action Items & Compliance Directives\n1. **Operational Reconciliation**: Reconcile shift logs against approved baseline parameters.\n2. **Variance Notification**: Escalate material operational deviations.\n3. **Statutory Archive**: Cross-reference this briefing in the MineMind Knowledge Base."
     )
-    return jsonify({"content": content, "summary": f"Synthesized official {template} across {len(sources)} unique document sources ({len(unique_chunks)} distinct data points) for {subsidiary}.", "citations": citations_from_matches([{"chunk": chunk} for chunk in unique_chunks])})
+    deterministic_summary = f"Synthesized official {template} across {len(sources)} unique document sources ({len(unique_chunks)} distinct data points) for {subsidiary}."
+    citations = citations_from_matches([{"chunk": chunk} for chunk in unique_chunks])
+
+    # Attempt a live, AI-polished synthesis strictly grounded in the same
+    # numbered source excerpts. Falls back to the deterministic template
+    # above if no provider key is configured in .env, or the call fails.
+    extracted_metrics = data.get("extractedMetrics") or []
+    validation = data.get("validation") or {}
+    context_blob = "\n\n".join(
+        f"[SOURCE {index}] {chunk.get('documentTitle', 'Technical Filing')} "
+        f"({chunk.get('documentCode', 'CMPDI/DOC')}, {chunk.get('pageOrSheetRef', 'Archive')}):\n{str(chunk.get('text', ''))[:600]}"
+        for index, chunk in enumerate(unique_chunks, start=1)
+    )
+    system_prompt = (
+        "You are a statutory report-writing engine for CMPDI/Coal India. Write ONLY using facts present in the "
+        "numbered SOURCE excerpts supplied below — never invent figures, dates, or approvals that aren't there. "
+        "Every factual clause must cite its source inline as (SOURCE n). Return strict JSON only with keys: "
+        "content (a Markdown report using '## 1. Statutory Context & Executive Directive', "
+        "'## 2. Synthesized Technical Findings', and '## 3. Statutory Action Items & Compliance Directives' as "
+        "section headers) and summary (one sentence describing what was synthesized)."
+    )
+    user_prompt = (
+        f"Report template: {template}\nSubsidiary: {subsidiary}\nPeriod: {period}\n"
+        f"Required metrics: {', '.join(str(m) for m in extracted_metrics) if extracted_metrics else 'not specified'}\n"
+        f"Validation confidence from Step 4: {validation.get('confidence', 'n/a')}%\n\n"
+        f"Numbered source excerpts:\n{context_blob}"
+    )
+    parsed, provider = call_llm_json(system_prompt, user_prompt, temperature=0.15)
+    if parsed and isinstance(parsed.get("content"), str) and parsed["content"].strip():
+        return jsonify({
+            "content": parsed["content"].strip(),
+            "summary": parsed.get("summary", deterministic_summary),
+            "citations": citations,
+            "provider": provider,
+        })
+
+    return jsonify({"content": deterministic_content, "summary": deterministic_summary, "citations": citations, "provider": "local-grounded-engine"})
 
 
 @app.get("/")

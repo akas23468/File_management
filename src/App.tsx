@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { HashRouter as Router } from 'react-router-dom';
 import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -185,8 +186,10 @@ const MainLayout: React.FC = () => {
 
 export default function App() {
   return (
-    <AppProvider>
-      <MainLayout />
-    </AppProvider>
+    <Router>
+      <AppProvider>
+        <MainLayout />
+      </AppProvider>
+    </Router>
   );
 }

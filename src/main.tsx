@@ -10,6 +10,8 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
-// Register Service Worker for offline underground mining support
-registerServiceWorker();
+// Register Service Worker for offline underground mining support on HTTP(S) only.
+if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+  registerServiceWorker();
+}
 

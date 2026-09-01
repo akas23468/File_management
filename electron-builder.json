@@ -1,0 +1,30 @@
+{
+  "appId": "com.minemind.app",
+  "productName": "MineMind AI",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "electron.js",
+    "dist/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "dist/app",
+      "to": "app_backend",
+      "filter": ["**/*"]
+    }
+  ],
+  "win": {
+    "target": "nsis"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "differentialPackage": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "MineMind AI"
+  }
+}
